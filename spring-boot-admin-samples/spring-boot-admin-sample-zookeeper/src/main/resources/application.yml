@@ -5,7 +5,7 @@ spring:
     config:
       enabled: false
     zookeeper:
-      connect-string: localhost:2181
+      connect-string: 172.16.0.70:8581
       discovery:
         metadata:
           management.context-path: /foo

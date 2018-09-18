@@ -46,7 +46,7 @@
             <div class="control">
               <label class="checkbox">
                 <input type="checkbox" v-model="showClassLoggersOnly">
-                class
+                class only
               </label>
             </div>
           </div>
@@ -93,10 +93,7 @@
   import Instance from '@/services/instance';
   import sbaLoggerControl from './logger-control';
 
-  const isPackageName = (name) => {
-    const i = name.lastIndexOf('.') + 1;
-    return name.charAt(i) !== name.charAt(i).toUpperCase();
-  };
+  const isClassName = name => /\.[A-Z]/.test(name);
 
   const addToFilter = (oldFilter, addedFilter) =>
     !oldFilter
@@ -118,7 +115,7 @@
       error: null,
       loggerConfig: null,
       filter: '',
-      showClassLoggersOnly: true,
+      showClassLoggersOnly: false,
       showConfiguredLoggersOnly: false,
       visibleLimit: 25,
       loading: {},
@@ -160,22 +157,18 @@
         }
       },
       fetchLoggers: async function () {
-        if (this.instance) {
-          this.error = null;
-          try {
-            const res = await this.instance.fetchLoggers();
-            this.loggerConfig = res.data;
-          } catch (error) {
-            console.warn('Fetching loggers failed:', error);
-            this.error = error;
-          }
-          this.hasLoaded = true;
+        this.error = null;
+        try {
+          const res = await this.instance.fetchLoggers();
+          this.loggerConfig = res.data;
+        } catch (error) {
+          console.warn('Fetching loggers failed:', error);
+          this.error = error;
         }
+        this.hasLoaded = true;
       },
       onScroll() {
-        if (this.loggerConfig
-          && (this.$el.getBoundingClientRect().bottom - 400) <= window.innerHeight
-          && this.visibleLimit < this.filteredLoggers.length) {
+        if (this.loggerConfig && this.$el.getBoundingClientRect().bottom - 400 <= window.innerHeight && this.visibleLimit < this.filteredLoggers.length) {
           this.visibleLimit += 25;
         }
       },
@@ -183,16 +176,16 @@
         let filterFn = null;
 
         if (this.showClassLoggersOnly) {
-          filterFn = addToFilter(filterFn, (logger) => !isPackageName(logger.name));
+          filterFn = addToFilter(filterFn, logger => isClassName(logger.name));
         }
 
         if (this.showConfiguredLoggersOnly) {
-          filterFn = addToFilter(filterFn, (logger) => !!logger.configuredLevel);
+          filterFn = addToFilter(filterFn, logger => !!logger.configuredLevel);
         }
 
         if (this.filter) {
           const normalizedFilter = this.filter.toLowerCase();
-          filterFn = addToFilter(filterFn, (logger) => logger.name.toLowerCase().indexOf(normalizedFilter) >= 0);
+          filterFn = addToFilter(filterFn, logger => logger.name.toLowerCase().includes(normalizedFilter));
         }
 
         return filterFn;
@@ -206,6 +199,17 @@
     },
     beforeDestroy() {
       window.removeEventListener('scroll', this.onScroll);
+    },
+    install({viewRegistry}) {
+      viewRegistry.addView({
+        name: 'instances/loggers',
+        parent: 'instances',
+        path: 'loggers',
+        component: this,
+        label: 'Loggers',
+        order: 300,
+        isEnabled: ({instance}) => instance.hasEndpoint('loggers')
+      });
     }
   }
 </script>

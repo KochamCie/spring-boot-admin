@@ -33,24 +33,30 @@
             <p v-text="pid"/>
           </div>
         </div>
-        <div class="level-item has-text-centered" v-if="metrics['process.uptime']">
+        <div class="level-item has-text-centered" v-if="uptime">
           <div>
             <p class="heading">Uptime</p>
             <p>
-              <process-uptime :value="metrics['process.uptime']"/>
+              <process-uptime :value="toMillis(uptime.value, uptime.baseUnit)"/>
             </p>
           </div>
         </div>
-        <div class="level-item has-text-centered" v-if="metrics['system.cpu.count']">
+        <div class="level-item has-text-centered" v-if="processCpuLoad">
           <div>
-            <p class="heading">CPUs</p>
-            <p v-text="metrics['system.cpu.count']"/>
+            <p class="heading">Process CPU Usage</p>
+            <p v-text="processCpuLoad.toFixed(2)"/>
           </div>
         </div>
-        <div class="level-item has-text-centered" v-if="metrics['system.load.average.1m']">
+        <div class="level-item has-text-centered" v-if="systemCpuLoad">
           <div>
-            <p class="heading">System Load (last 1m)</p>
-            <p v-text="metrics['system.load.average.1m'].toFixed(2)"/>
+            <p class="heading">System CPU Usage</p>
+            <p v-text="systemCpuLoad.toFixed(2)"/>
+          </div>
+        </div>
+        <div class="level-item has-text-centered" v-if="systemCpuCount">
+          <div>
+            <p class="heading">CPUs</p>
+            <p v-text="systemCpuCount"/>
           </div>
         </div>
       </div>
@@ -59,8 +65,10 @@
 </template>
 
 <script>
+  import subscribing from '@/mixins/subscribing';
   import Instance from '@/services/instance';
-  import _ from 'lodash'
+  import {concatMap, timer} from '@/utils/rxjs';
+  import {toMillis} from '../metrics/metric';
   import processUptime from './process-uptime';
 
   export default {
@@ -70,49 +78,92 @@
         required: true
       }
     },
+    mixins: [subscribing],
     components: {processUptime},
     data: () => ({
       hasLoaded: false,
       error: null,
       pid: null,
-      metrics: {
-        'process.uptime': null,
-        'system.load.average.1m': null,
-        'system.cpu.count': null,
-      }
+      uptime: {value: null, baseUnit: null},
+      systemCpuLoad: null,
+      processCpuLoad: null,
+      systemCpuCount: null
     }),
     created() {
-      this.fetchMetrics();
       this.fetchPid();
+      this.fetchUptime();
+      this.fetchCpuCount();
     },
     methods: {
-      async fetchMetrics() {
-        if (this.instance) {
-          const vm = this;
-          vm.error = null;
-          try {
-            await Promise.all(_.entries(vm.metrics)
-              .map(async ([name]) => {
-                  const response = await vm.instance.fetchMetric(name);
-                  vm.metrics[name] = response.data.measurements[0].value;
-                }
-              ));
-          } catch (error) {
-            console.warn('Fetching process metrics failed:', error);
-            this.error = error;
-          }
-          this.hasLoaded = true;
+      toMillis,
+      async fetchUptime() {
+        try {
+          const response = await this.fetchMetric('process.uptime');
+          this.uptime = {value: response.measurements[0].value, baseUnit: response.baseUnit};
+        } catch (error) {
+          this.error = error;
+          console.warn('Fetching Uptime failed:', error);
         }
+        this.hasLoaded = true;
       },
       async fetchPid() {
-        if (this.instance && this.instance.hasEndpoint('env')) {
+        if (this.instance.hasEndpoint('env')) {
           try {
             const response = await this.instance.fetchEnv('PID');
             this.pid = response.data.property.value;
           } catch (error) {
             console.warn('Fetching PID failed:', error);
           }
+          this.hasLoaded = true;
         }
+      },
+      async fetchCpuCount() {
+        try {
+          this.systemCpuCount = (await this.fetchMetric('system.cpu.count')).measurements[0].value;
+        } catch (error) {
+          console.warn('Fetching Cpu Count failed:', error);
+        }
+        this.hasLoaded = true;
+      },
+      createSubscription() {
+        const vm = this;
+        return timer(0, 2500)
+          .pipe(concatMap(this.fetchCpuLoadMetrics))
+          .subscribe({
+            next: data => {
+              vm.processCpuLoad = data.processCpuLoad;
+              vm.systemCpuLoad = data.systemCpuLoad;
+            },
+            error: error => {
+              vm.hasLoaded = true;
+              console.warn('Fetching CPU Usage metrics failed:', error);
+              vm.error = error;
+            }
+          });
+      },
+      async fetchCpuLoadMetrics() {
+        const fetchProcessCpuLoad = this.fetchMetric('process.cpu.usage');
+        const fetchSystemCpuLoad = this.fetchMetric('system.cpu.usage');
+        let processCpuLoad;
+        let systemCpuLoad;
+        try {
+          processCpuLoad = (await fetchProcessCpuLoad).measurements[0].value
+        } catch (error) {
+          console.warn('Fetching Process CPU Load failed:', error);
+        }
+        try {
+          systemCpuLoad = (await fetchSystemCpuLoad).measurements[0].value
+        } catch (error) {
+          console.warn('Fetching Sytem CPU Load failed:', error);
+        }
+        return {
+          processCpuLoad,
+          systemCpuLoad
+        };
+      },
+      async fetchMetric(name) {
+        const response = await this.instance.fetchMetric(name);
+        return response.data;
       }
     }
   }

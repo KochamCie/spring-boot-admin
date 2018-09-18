@@ -44,6 +44,11 @@
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-autoconfigure-processor</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-configuration-processor</artifactId>
             <optional>true</optional>
         </dependency>
@@ -74,6 +79,7 @@
                             <goal>exec</goal>
                         </goals>
                         <configuration>
+                            <skip>${skipNpmBuild}</skip>
                             <executable>npm</executable>
                             <arguments>
                                 <argument>run</argument>
@@ -114,6 +120,7 @@
                         <nonFilteredFileExtension>ico</nonFilteredFileExtension>
                         <nonFilteredFileExtension>png</nonFilteredFileExtension>
                     </nonFilteredFileExtensions>
+                    <includeEmptyDirs>true</includeEmptyDirs>
                 </configuration>
             </plugin>
         </plugins>

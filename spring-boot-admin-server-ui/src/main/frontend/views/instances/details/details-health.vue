@@ -26,17 +26,17 @@
           <p v-text="error.message"/>
         </div>
       </div>
-      <health-default v-if="health" name="Instance" :health="health"/>
+      <health-details v-if="health" name="Instance" :health="health"/>
     </div>
   </sba-panel>
 </template>
 
 <script>
   import Instance from '@/services/instance';
-  import healthDefault from './health/health-default';
+  import healthDetails from './health-details';
 
   export default {
-    components: {healthDefault},
+    components: {healthDetails},
     props: {
       instance: {
         type: Instance,
@@ -53,17 +53,15 @@
     },
     methods: {
       async fetchHealth() {
-        if (this.instance) {
-          this.error = null;
-          try {
-            const res = await this.instance.fetchHealth();
-            this.health = res.data;
-          } catch (error) {
-            console.warn('Fetching health failed:', error);
-            this.error = error;
-          }
-          this.hasLoaded = true;
+        this.error = null;
+        try {
+          const res = await this.instance.fetchHealth();
+          this.health = res.data;
+        } catch (error) {
+          console.warn('Fetching health failed:', error);
+          this.error = error;
         }
+        this.hasLoaded = true;
       }
     }
   }

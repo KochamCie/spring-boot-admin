@@ -18,27 +18,21 @@ package de.codecentric.boot.admin.server.web.client;
 
 import de.codecentric.boot.admin.server.domain.entities.Instance;
 import de.codecentric.boot.admin.server.domain.values.Endpoint;
+import de.codecentric.boot.admin.server.web.client.exception.ResolveEndpointException;
+import de.codecentric.boot.admin.server.web.client.exception.ResolveInstanceException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.net.URI;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalLong;
 import java.util.function.Function;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.actuate.endpoint.http.ActuatorMediaType;
-import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.http.ResponseCookie;
-import org.springframework.http.ResponseEntity;
-import org.springframework.http.client.reactive.ClientHttpResponse;
-import org.springframework.http.client.reactive.ClientHttpResponseDecorator;
-import org.springframework.util.MultiValueMap;
-import org.springframework.web.reactive.function.BodyExtractor;
-import org.springframework.web.reactive.function.BodyExtractors;
 import org.springframework.web.reactive.function.client.ClientRequest;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
@@ -46,13 +40,23 @@ import org.springframework.web.reactive.function.client.ExchangeFunction;
 import org.springframework.web.util.UriComponents;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import static de.codecentric.boot.admin.server.utils.MediaType.ACTUATOR_V1_MEDIATYPE;
+import static de.codecentric.boot.admin.server.utils.MediaType.ACTUATOR_V2_MEDIATYPE;
+import static java.util.Arrays.asList;
 import static java.util.Collections.singletonList;
+import static org.springframework.http.MediaType.APPLICATION_JSON;
 
 public final class InstanceExchangeFilterFunctions {
+    private static final Logger log = LoggerFactory.getLogger(InstanceExchangeFilterFunctions.class);
     public static final String ATTRIBUTE_INSTANCE = "instance";
     public static final String ATTRIBUTE_ENDPOINT = "endpointId";
-    private static final MediaType ACTUATOR_V1_MEDIATYPE = MediaType.parseMediaType(ActuatorMediaType.V1_JSON);
-    private static final MediaType ACTUATOR_V2_MEDIATYPE = MediaType.parseMediaType(ActuatorMediaType.V2_JSON);
+    private static final List<MediaType> DEFAULT_ACCEPT_MEDIATYPES = asList(MediaType.parseMediaType(ActuatorMediaType.V2_JSON),
+        MediaType.parseMediaType(ActuatorMediaType.V1_JSON),
+        MediaType.APPLICATION_JSON
+    );
+    private static final List<MediaType> DEFAULT_LOGFILE_ACCEPT_MEDIATYPES = asList(MediaType.TEXT_PLAIN,
+        MediaType.ALL
+    );
 
     private InstanceExchangeFilterFunctions() {
     }
@@ -62,19 +66,19 @@ public final class InstanceExchangeFilterFunctions {
     }
 
     public static ExchangeFilterFunction setInstance(Mono<Instance> instance) {
-        return (request, next) -> instance.map(
-            i -> ClientRequest.from(request).attribute(ATTRIBUTE_INSTANCE, i).build())
-                                          .switchIfEmpty(request.url().isAbsolute() ?
-                                              Mono.just(request) :
-                                              Mono.error(new InstanceWebClientException("Instance not found")))
+        return (request, next) -> instance.map(i -> ClientRequest.from(request)
+                                                                 .attribute(ATTRIBUTE_INSTANCE, i)
+                                                                 .build())
+                                          .switchIfEmpty(request.url().isAbsolute() ? Mono.just(request) : Mono.error(
+                                              new ResolveInstanceException("Could not resolve Instance")))
                                           .flatMap(next::exchange);
     }
 
     public static ExchangeFilterFunction addHeaders(HttpHeadersProvider httpHeadersProvider) {
         return toExchangeFilterFunction((instance, request, next) -> {
             ClientRequest newRequest = ClientRequest.from(request)
-                                                    .headers(headers -> headers.addAll(
-                                                        httpHeadersProvider.getHeaders(instance)))
+                                                    .headers(headers -> headers.addAll(httpHeadersProvider.getHeaders(
+                                                        instance)))
                                                     .build();
             return next.exchange(newRequest);
         });
@@ -93,22 +97,29 @@ public final class InstanceExchangeFilterFunctions {
     public static ExchangeFilterFunction rewriteEndpointUrl() {
         return toExchangeFilterFunction((instance, request, next) -> {
             if (request.url().isAbsolute()) {
+                log.trace("Absolute URL '{}' for instance {} not rewritten", request.url(), instance.getId());
                 return next.exchange(request);
             }
 
             UriComponents oldUrl = UriComponentsBuilder.fromUri(request.url()).build();
             if (oldUrl.getPathSegments().isEmpty()) {
-                return Mono.error(new InstanceWebClientException("No endpoint specified"));
+                return Mono.error(new ResolveEndpointException("No endpoint specified"));
             }
 
             String endpointId = oldUrl.getPathSegments().get(0);
             Optional<Endpoint> endpoint = instance.getEndpoints().get(endpointId);
 
             if (!endpoint.isPresent()) {
-                return Mono.error(new InstanceWebClientException("Endpoint '" + endpointId + "' not found"));
+                return Mono.error(new ResolveEndpointException("Endpoint '" + endpointId + "' not found"));
             }
 
             URI newUrl = rewriteUrl(oldUrl, endpoint.get().getUrl());
+            log.trace("URL '{}' for Endpoint {} of instance {} rewritten to {}",
+                oldUrl,
+                endpoint.get().getId(),
+                instance.getId(),
+                newUrl
+            );
             ClientRequest newRequest = ClientRequest.from(request)
                                                     .attribute(ATTRIBUTE_ENDPOINT, endpoint.get().getId())
                                                     .url(newUrl)
@@ -133,7 +144,11 @@ public final class InstanceExchangeFilterFunctions {
             Mono<ClientResponse> clientResponse = next.exchange(request);
             if (request.attribute(ATTRIBUTE_ENDPOINT).map(converter::canConvert).orElse(false)) {
                 return clientResponse.flatMap(response -> {
-                    if (response.headers().contentType().map(ACTUATOR_V1_MEDIATYPE::isCompatibleWith).orElse(false)) {
+                    if (response.headers()
+                                .contentType()
+                                .map(t -> ACTUATOR_V1_MEDIATYPE.isCompatibleWith(t) ||
+                                          APPLICATION_JSON.isCompatibleWith(t))
+                                .orElse(false)) {
                         return convertClientResponse(converter::convert, ACTUATOR_V2_MEDIATYPE).apply(response);
                     }
                     return Mono.just(response);
@@ -145,151 +160,27 @@ public final class InstanceExchangeFilterFunctions {
 
     private static Function<ClientResponse, Mono<ClientResponse>> convertClientResponse(Function<Flux<DataBuffer>, Flux<DataBuffer>> bodConverter,
                                                                                         MediaType contentType) {
-        return response -> Mono.just(new ConvertedBodyResponse(response, bodConverter, contentType));
+        return response -> {
+            ClientResponse convertedResponse = ClientResponse.from(response).headers(headers -> {
+                headers.replace(HttpHeaders.CONTENT_TYPE, singletonList(contentType.toString()));
+                headers.remove(HttpHeaders.CONTENT_LENGTH);
+            }).body(response.bodyToFlux(DataBuffer.class).transform(bodConverter)).build();
+            return Mono.just(convertedResponse);
+        };
     }
 
-    private static class ConvertedBodyResponse implements ClientResponse {
-        private final ClientResponse response;
-        private final Function<Flux<DataBuffer>, Flux<DataBuffer>> converter;
-        private final Headers headers;
-
-        private ConvertedBodyResponse(ClientResponse response,
-                                      Function<Flux<DataBuffer>, Flux<DataBuffer>> converter,
-                                      MediaType contentType) {
-            this.response = response;
-            this.converter = converter;
-            this.headers = new Headers() {
-                @Override
-                public OptionalLong contentLength() {
-                    return response.headers().contentLength();
-                }
-
-                @Override
-                public Optional<MediaType> contentType() {
-                    return Optional.ofNullable(contentType);
-                }
-
-                @Override
-                public List<String> header(String headerName) {
-                    if (headerName.equals(HttpHeaders.CONTENT_TYPE)) {
-                        return singletonList(contentType.toString());
-                    }
-                    return response.headers().header(headerName);
-                }
-
-                @Override
-                public HttpHeaders asHttpHeaders() {
-                    HttpHeaders newHeaders = new HttpHeaders();
-                    newHeaders.putAll(response.headers().asHttpHeaders());
-                    newHeaders.replace(HttpHeaders.CONTENT_TYPE, singletonList(contentType.toString()));
-                    return HttpHeaders.readOnlyHttpHeaders(newHeaders);
-                }
-            };
-        }
-
-        @Override
-        public HttpStatus statusCode() {
-            return response.statusCode();
-        }
-
-        @Override
-        public Headers headers() {
-            return headers;
-        }
-
-        @Override
-        public MultiValueMap<String, ResponseCookie> cookies() {
-            return response.cookies();
-        }
-
-        @Override
-        public <T> T body(BodyExtractor<T, ? super ClientHttpResponse> extractor) {
-            return response.body((inputMessage, context) -> {
-                ClientHttpResponse convertedMessage = new ClientHttpResponseDecorator(inputMessage) {
-                    @Override
-                    public Flux<DataBuffer> getBody() {
-                        return super.getBody().transform(ConvertedBodyResponse.this.converter);
-                    }
-                };
-                return extractor.extract(convertedMessage, context);
-            });
-        }
-
-        @Override
-        public <T> Mono<T> bodyToMono(Class<? extends T> elementClass) {
-            if (Void.class.isAssignableFrom(elementClass)) {
-                return response.bodyToMono(elementClass);
-            } else {
-                return body(BodyExtractors.toMono(elementClass));
+    public static ExchangeFilterFunction setDefaultAcceptHeader() {
+        return toExchangeFilterFunction((instance, request, next) -> {
+            if (request.headers().getAccept().isEmpty()) {
+                Boolean isRequestForLogfile = request.attribute(ATTRIBUTE_ENDPOINT)
+                                                     .map(Endpoint.LOGFILE::equals)
+                                                     .orElse(false);
+                List<MediaType> acceptedHeaders = isRequestForLogfile ? DEFAULT_LOGFILE_ACCEPT_MEDIATYPES : DEFAULT_ACCEPT_MEDIATYPES;
+                return next.exchange(ClientRequest.from(request)
+                                                  .headers(headers -> headers.setAccept(acceptedHeaders))
+                                                  .build());
             }
-        }
-
-        @Override
-        public <T> Mono<T> bodyToMono(ParameterizedTypeReference<T> typeReference) {
-            if (Void.class.isAssignableFrom(typeReference.getType().getClass())) {
-                return response.bodyToMono(typeReference);
-            } else {
-                return body(BodyExtractors.toMono(typeReference));
-            }
-        }
-
-        @Override
-        public <T> Flux<T> bodyToFlux(Class<? extends T> elementClass) {
-            if (Void.class.isAssignableFrom(elementClass)) {
-                return response.bodyToFlux(elementClass);
-            } else {
-                return body(BodyExtractors.toFlux(elementClass));
-            }
-        }
-
-        @Override
-        public <T> Flux<T> bodyToFlux(ParameterizedTypeReference<T> typeReference) {
-            if (Void.class.isAssignableFrom(typeReference.getType().getClass())) {
-                return response.bodyToFlux(typeReference);
-            } else {
-                return body(BodyExtractors.toFlux(typeReference));
-            }
-        }
-
-        @Override
-        public <T> Mono<ResponseEntity<T>> toEntity(Class<T> bodyType) {
-            if (Void.class.isAssignableFrom(bodyType)) {
-                return response.toEntity(bodyType);
-            } else {
-                return toEntityInternal(bodyToMono(bodyType));
-            }
-        }
-
-        @Override
-        public <T> Mono<ResponseEntity<T>> toEntity(ParameterizedTypeReference<T> typeReference) {
-            if (Void.class.isAssignableFrom(typeReference.getType().getClass())) {
-                return response.toEntity(typeReference);
-            } else {
-                return toEntityInternal(bodyToMono(typeReference));
-            }
-        }
-
-        private <T> Mono<ResponseEntity<T>> toEntityInternal(Mono<T> bodyMono) {
-            HttpHeaders headers = headers().asHttpHeaders();
-            HttpStatus statusCode = statusCode();
-            return bodyMono.map(body -> new ResponseEntity<>(body, headers, statusCode))
-                           .switchIfEmpty(Mono.defer(() -> Mono.just(new ResponseEntity<>(headers, statusCode))));
-        }
-
-        @Override
-        public <T> Mono<ResponseEntity<List<T>>> toEntityList(Class<T> responseType) {
-            return toEntityListInternal(bodyToFlux(responseType));
-        }
-
-        @Override
-        public <T> Mono<ResponseEntity<List<T>>> toEntityList(ParameterizedTypeReference<T> typeReference) {
-            return toEntityListInternal(bodyToFlux(typeReference));
-        }
-
-        private <T> Mono<ResponseEntity<List<T>>> toEntityListInternal(Flux<T> bodyFlux) {
-            HttpHeaders headers = headers().asHttpHeaders();
-            HttpStatus statusCode = statusCode();
-            return bodyFlux.collectList().map(body -> new ResponseEntity<>(body, headers, statusCode));
-        }
+            return next.exchange(request);
+        });
     }
 }

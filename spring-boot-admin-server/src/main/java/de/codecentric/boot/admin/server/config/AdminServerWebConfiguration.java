@@ -48,8 +48,8 @@ public class AdminServerWebConfiguration {
     public SimpleModule adminJacksonModule() {
         SimpleModule module = new SimpleModule();
         module.addDeserializer(Registration.class, new RegistrationDeserializer());
-        module.setSerializerModifier(new RegistrationBeanSerializerModifier(
-            new SanitizingMapSerializer(adminServerProperties.getMetadataKeysToSanitize())));
+        module.setSerializerModifier(new RegistrationBeanSerializerModifier(new SanitizingMapSerializer(
+            adminServerProperties.getMetadataKeysToSanitize())));
         return module;
     }
 
@@ -78,11 +78,14 @@ public class AdminServerWebConfiguration {
         @Bean
         @ConditionalOnMissingBean
         public de.codecentric.boot.admin.server.web.reactive.InstancesProxyController instancesProxyController(
-
-            InstanceRegistry instanceRegistry, InstanceWebClient instanceWebClient) {
+            InstanceRegistry instanceRegistry,
+            InstanceWebClient instanceWebClient) {
             return new de.codecentric.boot.admin.server.web.reactive.InstancesProxyController(
-                adminServerProperties.getContextPath(), adminServerProperties.getInstanceProxy().getIgnoredHeaders(),
-                instanceRegistry, instanceWebClient);
+                adminServerProperties.getContextPath(),
+                adminServerProperties.getInstanceProxy().getIgnoredHeaders(),
+                instanceRegistry,
+                instanceWebClient
+            );
         }
 
         @Bean
@@ -109,9 +112,12 @@ public class AdminServerWebConfiguration {
         @ConditionalOnMissingBean
         public InstancesProxyController instancesProxyController(InstanceRegistry instanceRegistry,
                                                                  InstanceWebClient instanceWebClient) {
-            return new InstancesProxyController(adminServerProperties.getContextPath(),
-                adminServerProperties.getInstanceProxy().getIgnoredHeaders(), instanceRegistry, instanceWebClient,
-                adminServerProperties.getMonitor().getReadTimeout());
+            return new InstancesProxyController(
+                adminServerProperties.getContextPath(),
+                adminServerProperties.getInstanceProxy().getIgnoredHeaders(),
+                instanceRegistry,
+                instanceWebClient
+            );
         }
 
         @Bean

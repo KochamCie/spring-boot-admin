@@ -16,10 +16,32 @@
 @import "utilities";
 // Import the rest of Bulma
 @import "~bulma/bulma";
-@import "~bulma-badge/dist/bulma-badge";
+@import "~bulma-badge/dist/css/bulma-badge";
+
+html {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+body {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+
+  & > div {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+  }
+}
 
 .is-breakable {
   word-break: break-all;
+}
+
+.monospaced {
+  font-family: $family-monospace;
 }
 
 .is-muted {
@@ -35,13 +57,8 @@
   border-color: transparent;
 }
 
-//navbar color fixes
-.navbar-item .button.is-icon {
-  color: $navbar-item-color;
-  &:hover {
-    color: $navbar-item-hover-color;
-  }
-
+.navbar-link::after {
+  border-color: currentColor;
 }
 
 .navbar .badge {
@@ -49,7 +66,6 @@
     box-shadow: 0 0 0 $badge-border-size $navbar-background-color;
   }
 }
-
 
 //Loading spinner
 .section.is-loading,
@@ -61,6 +77,14 @@
     left: calc(50% - 2.5em);
     top: calc(50% - 2.5em);
     border-width: 0.5rem;
+  }
+}
+
+p.is-loading {
+  &::before {
+    display: inline-block;
+    right: 0.25em;
+    @include loader;
   }
 }
 

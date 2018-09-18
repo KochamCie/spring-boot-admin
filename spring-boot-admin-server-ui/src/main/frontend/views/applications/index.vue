@@ -26,7 +26,7 @@
           <p v-text="error.message"/>
         </div>
       </div>
-      <div class="level">
+      <div class="level applications-stats">
         <div class="level-item has-text-centered">
           <div>
             <p class="heading">Applications</p>
@@ -50,9 +50,9 @@
           </div>
         </div>
       </div>
-      <div v-for="group in statusGroups" :key="group.status">
+      <div class="application-group" v-for="group in statusGroups" :key="group.status">
         <p class="heading" v-text="group.status"/>
-        <applications-list :applications="group.applications"/>
+        <applications-list :applications="group.applications" :selected="selected"/>
       </div>
       <div v-if="statusGroups.length === 0">
         <p class="is-muted">No applications registered.</p>
@@ -64,16 +64,20 @@
 <script>
   import * as _ from 'lodash';
   import applicationsList from './applications-list';
-  import handle from './handle';
+  import label from './label';
 
-  const component = {
+  export default {
     props: {
       applications: {
         type: Array,
         default: () => [],
       },
       error: {
-        type: Object,
+        type: null,
+        default: null
+      },
+      selected: {
+        type: String,
         default: null
       }
     },
@@ -100,15 +104,26 @@
         }, 0);
       }
     },
-    methods: {}
-  };
-
-  export default component;
-  export const view = {
-    path: '/applications',
-    name: 'applications',
-    handle: handle,
-    order: 0,
-    component: component
+    install({viewRegistry}) {
+      viewRegistry.addView({
+        path: '/applications/:selected?',
+        props: true,
+        name: 'applications',
+        label,
+        order: 0,
+        component: this
+      });
+      viewRegistry.addRedirect('/', 'applications');
+    }
   };
 </script>
+
+
+<style lang="scss">
+  @import "~@/assets/css/utilities";
+
+  .application-group {
+    margin: $gap 0;
+  }
+
+</style>

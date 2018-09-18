@@ -15,36 +15,27 @@
   -->
 
 <template>
-  <section class="hero is-primary instance-tabs">
+  <section id="instance-tabs" class="hero instance-tabs">
     <div class="hero-foot">
-      <div class="container">
-        <div class="level">
-          <div class="level-left">
-            <div class="instance-tabs__name"
-                 :class="{ 'is-active' : isStuck }">
-              <h1 class="title is-5" v-if="instance" v-text="instance.registration.name"/>
-              <h1 class="subtitle is-6" v-if="instance"><strong v-text="instance.id"/> (of <span
-                v-text="application.instances.length"/>)</h1>
-            </div>
-          </div>
-          <div class="level-right">
-            <nav class="tabs is-boxed is-right">
-              <ul>
-                <li v-if="instance" v-for="view in activeViews" :key="view.name"
-                    :class="{'is-active' : $route.name === view.name}">
-                  <a v-if="view.href" :href="view.href({ 'instanceId' : instance.id })"
-                     target="_blank">
-                    <component :is="view.handle"/>
-                  </a>
-                  <router-link v-else
-                               :to="{ name: view.name, params: { 'instanceId' : instance.id } }">
-                    <component :is="view.handle"/>
-                  </router-link>
-                </li>
-              </ul>
-            </nav>
-          </div>
+      <div class="container instance-tabs__tabs">
+
+        <div class="instance-tabs__name"
+             :class="{ 'is-active' : isStuck }">
+          <h1 class="title is-5" v-if="instance" v-text="instance.registration.name"/>
+          <h1 class="subtitle is-6" v-if="instance"><strong v-text="instance.id"/> (of <span
+            v-text="application.instances.length"/>)</h1>
         </div>
+
+        <nav class="instance-tabs__tabs tabs is-boxed">
+          <ul>
+            <li v-if="instance" v-for="view in enabledViews" :key="view.name"
+                :class="{'is-active' : $route.name === view.name}">
+              <router-link :to="{ name: view.name, params: { 'instanceId' : instance.id } }">
+                <component :is="view.label"/>
+              </router-link>
+            </li>
+          </ul>
+        </nav>
       </div>
     </div>
   </section>
@@ -53,6 +44,7 @@
 <script>
   import Application from '@/services/application';
   import Instance from '@/services/instance';
+  import {compareBy} from '@/utils/collections';
 
   export default {
     props: {
@@ -73,14 +65,14 @@
       isStuck: false
     }),
     computed: {
-      activeViews() {
-        if (!this.instance || !this.views) {
+      enabledViews() {
+        if (!this.instance) {
           return [];
         }
 
-        return this.views.filter(
-          view => typeof view.isActive === 'undefined' || view.isActive({instance: this.instance})
-        );
+        return [...this.views].filter(
+          view => view.label && (typeof view.isEnabled === 'undefined' || view.isEnabled({instance: this.instance}))
+        ).sort(compareBy(v => v.order));
       }
     },
     methods: {
@@ -105,6 +97,22 @@
     position: sticky;
     top: $navbar-height-px;
     overflow: hidden;
+
+    &__tabs {
+      display: flex;
+      align-items: flex-end;
+
+      & ul {
+        flex: 1 1 100%;
+        overflow: hidden;
+      }
+
+      & li {
+        flex-shrink: 1;
+        text-overflow: ellipsis;
+        overflow: hidden;
+      }
+    }
 
     &__name {
       transition: all $easing $speed;

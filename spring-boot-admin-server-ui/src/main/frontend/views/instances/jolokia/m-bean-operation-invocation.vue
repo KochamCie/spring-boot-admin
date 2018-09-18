@@ -182,11 +182,5 @@
     beforeDestroy() {
       document.removeEventListener('keyup', this.keyHandler)
     },
-
-    watch: {}
   }
 </script>
-
-<style lang="scss">
-  @import "~@/assets/css/utilities";
-</style>

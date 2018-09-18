@@ -23,6 +23,7 @@ import org.springframework.util.Assert;
 public class Endpoint implements Serializable {
     public static final String INFO = "info";
     public static final String HEALTH = "health";
+    public static final String LOGFILE = "logfile";
     public static final String ENV = "env";
     public static final String HTTPTRACE = "httptrace";
     public static final String THREADDUMP = "threaddump";
@@ -31,7 +32,7 @@ public class Endpoint implements Serializable {
     private final String id;
     private final String url;
 
-    public Endpoint(String id, String url) {
+    private Endpoint(String id, String url) {
         Assert.hasText(id, "'id' must not be empty.");
         Assert.hasText(url, "'url' must not be empty.");
         this.id = id;

@@ -17,15 +17,18 @@
 package de.codecentric.boot.admin.server.web.client;
 
 import de.codecentric.boot.admin.server.domain.entities.Instance;
+import de.codecentric.boot.admin.server.domain.values.Endpoints;
 import de.codecentric.boot.admin.server.domain.values.InstanceId;
 import de.codecentric.boot.admin.server.domain.values.Registration;
+import de.codecentric.boot.admin.server.web.client.exception.ResolveEndpointException;
+import de.codecentric.boot.admin.server.web.client.exception.ResolveInstanceException;
 import io.netty.handler.timeout.ReadTimeoutException;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 import java.time.Duration;
-import java.util.OptionalLong;
-import org.junit.ClassRule;
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
 import org.springframework.boot.actuate.endpoint.http.ActuatorMediaType;
@@ -34,8 +37,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import com.github.tomakehurst.wiremock.core.Options;
-import com.github.tomakehurst.wiremock.junit.WireMockClassRule;
+import com.github.tomakehurst.wiremock.junit.WireMockRule;
 
+import static com.github.tomakehurst.wiremock.client.WireMock.containing;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
@@ -45,20 +49,28 @@ import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.springframework.http.HttpHeaders.ACCEPT;
 import static org.springframework.http.HttpHeaders.AUTHORIZATION;
 import static org.springframework.http.HttpHeaders.CONTENT_LENGTH;
 import static org.springframework.http.HttpHeaders.CONTENT_TYPE;
 import static org.springframework.http.HttpHeaders.EMPTY;
+import static wiremock.org.apache.http.HttpHeaders.ACCEPT;
 
 public class InstanceWebClientTest {
-    @ClassRule
-    public static WireMockClassRule wireMockClass = new WireMockClassRule(Options.DYNAMIC_PORT);
     @Rule
-    public WireMockClassRule wireMock = wireMockClass;
+    public WireMockRule wireMock = new WireMockRule(Options.DYNAMIC_PORT);
 
     private final HttpHeadersProvider headersProvider = mock(HttpHeadersProvider.class, invocation -> EMPTY);
     private final InstanceWebClient instanceWebClient = new InstanceWebClient(headersProvider);
+
+    @BeforeClass
+    public static void setUp() {
+        StepVerifier.setDefaultTimeout(Duration.ofSeconds(5));
+    }
+
+    @AfterClass
+    public static void tearDown() {
+        StepVerifier.resetDefaultTimeout();
+    }
 
     @Test
     public void should_rewirte_url() {
@@ -69,10 +81,7 @@ public class InstanceWebClientTest {
         Mono<ClientResponse> exchange = instanceWebClient.instance(instance).get().uri("health").exchange();
 
         StepVerifier.create(exchange).expectNextCount(1).verifyComplete();
-        wireMock.verify(1,
-            getRequestedFor(urlEqualTo("/status")).withHeader(ACCEPT, equalTo(MediaType.APPLICATION_JSON_VALUE))
-                                                  .withHeader(ACCEPT, equalTo(ActuatorMediaType.V1_JSON))
-                                                  .withHeader(ACCEPT, equalTo(ActuatorMediaType.V2_JSON)));
+        wireMock.verify(1, getRequestedFor(urlEqualTo("/status")));
     }
 
     @Test
@@ -103,7 +112,7 @@ public class InstanceWebClientTest {
     }
 
     @Test
-    public void should_add_headers() {
+    public void should_add_headers_from_provider() {
         Instance instance = Instance.create(InstanceId.of("id"))
                                     .register(Registration.create("test", wireMock.url("/status")).build());
         wireMock.stubFor(get("/status").willReturn(ok()));
@@ -116,25 +125,77 @@ public class InstanceWebClientTest {
     }
 
     @Test
+    public void should_add_default_accept_headers() {
+        Instance instance = Instance.create(InstanceId.of("id"))
+                                    .register(Registration.create("test", wireMock.url("/status")).build());
+        wireMock.stubFor(get("/status").willReturn(ok()));
+
+        Mono<ClientResponse> exchange = instanceWebClient.instance(instance).get().uri("health").exchange();
+
+        StepVerifier.create(exchange).expectNextCount(1).verifyComplete();
+        wireMock.verify(1,
+            getRequestedFor(urlEqualTo("/status")).withHeader(ACCEPT, containing(MediaType.APPLICATION_JSON_VALUE))
+                                                  .withHeader(ACCEPT, containing(ActuatorMediaType.V1_JSON))
+                                                  .withHeader(ACCEPT, containing(ActuatorMediaType.V2_JSON))
+        );
+    }
+
+    @Test
+    public void should_not_add_default_accept_headers() {
+        Instance instance = Instance.create(InstanceId.of("id"))
+                                    .register(Registration.create("test", wireMock.url("/status")).build());
+        wireMock.stubFor(get("/status").willReturn(ok()));
+
+        Mono<ClientResponse> exchange = instanceWebClient.instance(instance)
+                                                         .get()
+                                                         .uri("health")
+                                                         .header(ACCEPT, MediaType.TEXT_XML_VALUE)
+                                                         .exchange();
+
+        StepVerifier.create(exchange).expectNextCount(1).verifyComplete();
+        wireMock.verify(1,
+            getRequestedFor(urlEqualTo("/status")).withHeader(ACCEPT, equalTo(MediaType.TEXT_XML_VALUE))
+        );
+    }
+
+    @Test
+    public void should_add_default_logfile_accept_headers() {
+        Instance instance = Instance.create(InstanceId.of("id"))
+                                    .register(Registration.create("test", wireMock.url("/status")).build())
+                                    .withEndpoints(Endpoints.single("logfile", wireMock.url("/log")));
+        wireMock.stubFor(get("/log").willReturn(ok()));
+
+        Mono<ClientResponse> exchange = instanceWebClient.instance(instance).get().uri("logfile").exchange();
+
+        StepVerifier.create(exchange).expectNextCount(1).verifyComplete();
+        wireMock.verify(1,
+            getRequestedFor(urlEqualTo("/log")).withHeader(ACCEPT, containing(MediaType.TEXT_PLAIN_VALUE))
+                                                  .withHeader(ACCEPT, containing(MediaType.ALL_VALUE))
+        );
+    }
+
+    @Test
     public void should_convert_legacy_endpont() {
         Instance instance = Instance.create(InstanceId.of("id"))
                                     .register(Registration.create("test", wireMock.url("/status")).build());
 
         String responseBody = "{ \"status\" : \"UP\", \"foo\" : \"bar\" }";
-        wireMock.stubFor(get("/status").willReturn(
-            okForContentType(ActuatorMediaType.V1_JSON, responseBody).withHeader(CONTENT_LENGTH,
-                Integer.toString(responseBody.length())).withHeader("X-Custom", "1234")));
+        wireMock.stubFor(get("/status").willReturn(okForContentType(ActuatorMediaType.V1_JSON, responseBody).withHeader(CONTENT_LENGTH,
+            Integer.toString(responseBody.length())
+        ).withHeader("X-Custom", "1234")));
 
         Mono<ClientResponse> exchange = instanceWebClient.instance(instance).get().uri("health").exchange();
 
 
         StepVerifier.create(exchange).assertNext(response -> {
-            assertThat(response.headers().contentLength()).isEqualTo(OptionalLong.of(responseBody.length()));
+            assertThat(response.headers().contentLength()).isEmpty();
             assertThat(response.headers().contentType()).contains(MediaType.parseMediaType(ActuatorMediaType.V2_JSON));
             assertThat(response.headers().header("X-Custom")).containsExactly("1234");
             assertThat(response.headers().header(CONTENT_TYPE)).containsExactly(ActuatorMediaType.V2_JSON);
+            assertThat(response.headers().header(CONTENT_LENGTH)).isEmpty();
             assertThat(response.headers().asHttpHeaders().get("X-Custom")).containsExactly("1234");
             assertThat(response.headers().asHttpHeaders().get(CONTENT_TYPE)).containsExactly(ActuatorMediaType.V2_JSON);
+            assertThat(response.headers().asHttpHeaders().get(CONTENT_LENGTH)).isNull();
             assertThat(response.statusCode()).isEqualTo(HttpStatus.OK);
         }).verifyComplete();
 
@@ -150,8 +211,8 @@ public class InstanceWebClientTest {
     public void should_error_on_relative_url_without_instance() {
         Mono<ClientResponse> exchange = instanceWebClient.instance(Mono.empty()).get().uri("health").exchange();
         StepVerifier.create(exchange)
-                    .verifyErrorSatisfies(ex -> assertThat(ex).isInstanceOf(InstanceWebClientException.class)
-                                                              .hasMessageContaining("Instance not found"));
+                    .verifyErrorSatisfies(ex -> assertThat(ex).isInstanceOf(ResolveInstanceException.class)
+                                                              .hasMessageContaining("Could not resolve Instance"));
     }
 
     @Test
@@ -162,7 +223,7 @@ public class InstanceWebClientTest {
         Mono<ClientResponse> exchange = instanceWebClient.instance(instance).get().uri("unknown").exchange();
 
         StepVerifier.create(exchange)
-                    .verifyErrorSatisfies(ex -> assertThat(ex).isInstanceOf(InstanceWebClientException.class)
+                    .verifyErrorSatisfies(ex -> assertThat(ex).isInstanceOf(ResolveEndpointException.class)
                                                               .hasMessageContaining("Endpoint 'unknown' not found"));
     }
 
@@ -174,14 +235,16 @@ public class InstanceWebClientTest {
         Mono<ClientResponse> exchange = instanceWebClient.instance(instance).get().uri("/").exchange();
 
         StepVerifier.create(exchange)
-                    .verifyErrorSatisfies(ex -> assertThat(ex).isInstanceOf(InstanceWebClientException.class)
+                    .verifyErrorSatisfies(ex -> assertThat(ex).isInstanceOf(ResolveEndpointException.class)
                                                               .hasMessageContaining("No endpoint specified"));
     }
 
     @Test
     public void should_error_on_timeout() {
-        InstanceWebClient fastTimeoutClient = new InstanceWebClient(headersProvider, Duration.ofMillis(10),
-            Duration.ofMillis(10));
+        InstanceWebClient fastTimeoutClient = new InstanceWebClient(headersProvider,
+            Duration.ofMillis(10),
+            Duration.ofMillis(10)
+        );
 
         wireMock.stubFor(get("/foo").willReturn(ok().withFixedDelay(100)));
 

@@ -60,7 +60,7 @@
 <script>
   import subscribing from '@/mixins/subscribing';
   import Instance from '@/services/instance';
-  import {Observable} from '@/utils/rxjs';
+  import {concatMap, timer} from '@/utils/rxjs';
   import moment from 'moment';
   import prettyBytes from 'pretty-bytes';
   import memChart from './mem-chart';
@@ -99,39 +99,35 @@
     methods: {
       prettyBytes,
       async fetchMetrics() {
-        if (this.instance) {
-          const responseMax = this.instance.fetchMetric('jvm.memory.max', {area: this.type});
-          const responseUsed = this.instance.fetchMetric('jvm.memory.used', {area: this.type});
-          const responeMetaspace = this.type === 'nonheap'
-            ? this.instance.fetchMetric('jvm.memory.used', {area: this.type, id: 'Metaspace'})
-            : null;
-          const responseCommitted = this.instance.fetchMetric('jvm.memory.committed', {area: this.type});
-          return {
-            max: (await responseMax).data.measurements[0].value,
-            used: (await responseUsed).data.measurements[0].value,
-            metaspace: responeMetaspace ? (await responeMetaspace).data.measurements[0].value : null,
-            committed: (await responseCommitted).data.measurements[0].value
-          };
-        }
+        const responseMax = this.instance.fetchMetric('jvm.memory.max', {area: this.type});
+        const responseUsed = this.instance.fetchMetric('jvm.memory.used', {area: this.type});
+        const responeMetaspace = this.type === 'nonheap'
+          ? this.instance.fetchMetric('jvm.memory.used', {area: this.type, id: 'Metaspace'})
+          : null;
+        const responseCommitted = this.instance.fetchMetric('jvm.memory.committed', {area: this.type});
+        return {
+          max: (await responseMax).data.measurements[0].value,
+          used: (await responseUsed).data.measurements[0].value,
+          metaspace: responeMetaspace ? (await responeMetaspace).data.measurements[0].value : null,
+          committed: (await responseCommitted).data.measurements[0].value
+        };
       },
       createSubscription() {
         const vm = this;
-        if (this.instance) {
-          return Observable.timer(0, 2500)
-            .concatMap(this.fetchMetrics)
-            .subscribe({
-              next: data => {
-                vm.hasLoaded = true;
-                vm.current = data;
-                vm.chartData.push({...data, timestamp: moment.now().valueOf()});
-              },
-              error: error => {
-                vm.hasLoaded = true;
-                console.warn('Fetching memory metrics failed:', error);
-                vm.error = error;
-              }
-            });
-        }
+        return timer(0, 2500)
+          .pipe(concatMap(this.fetchMetrics))
+          .subscribe({
+            next: data => {
+              vm.hasLoaded = true;
+              vm.current = data;
+              vm.chartData.push({...data, timestamp: moment.now().valueOf()});
+            },
+            error: error => {
+              vm.hasLoaded = true;
+              console.warn('Fetching memory metrics failed:', error);
+              vm.error = error;
+            }
+          });
       }
     }
   }

@@ -31,9 +31,11 @@ import java.util.logging.Level;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.reactive.function.client.ClientResponse;
 
+import static de.codecentric.boot.admin.server.utils.MediaType.ACTUATOR_V2_MEDIATYPE;
 import static java.util.Collections.emptyMap;
 
 /**
@@ -77,25 +79,37 @@ public class StatusUpdater {
     }
 
     protected Mono<StatusInfo> convertStatusInfo(ClientResponse response) {
-        if (response.headers().contentType().map(MediaType.APPLICATION_JSON::includes).orElse(false)) {
+        Boolean hasCompatibleContentType = response.headers()
+                                                   .contentType()
+                                                   .map(mt -> mt.isCompatibleWith(MediaType.APPLICATION_JSON) ||
+                                                              mt.isCompatibleWith(ACTUATOR_V2_MEDIATYPE))
+                                                   .orElse(false);
+
+        StatusInfo statusInfoFromStatus = this.getStatusInfoFromStatus(response.statusCode(), emptyMap());
+        if (hasCompatibleContentType) {
             return response.bodyToMono(RESPONSE_TYPE).map(body -> {
                 if (body.get("status") instanceof String) {
                     return StatusInfo.from(body);
                 }
-                return getStatusInfoFromStatus(response, body);
-            });
+                return getStatusInfoFromStatus(response.statusCode(), body);
+            }).defaultIfEmpty(statusInfoFromStatus);
         }
-        return Mono.just(this.getStatusInfoFromStatus(response, emptyMap()));
+        return response.bodyToMono(Void.class).then(Mono.just(statusInfoFromStatus));
     }
 
-    protected StatusInfo getStatusInfoFromStatus(ClientResponse response, Map<String, ?> body) {
-        if (response.statusCode().is2xxSuccessful()) {
+    @SuppressWarnings("unchecked")
+    protected StatusInfo getStatusInfoFromStatus(HttpStatus httpStatus, Map<String, ?> body) {
+        if (httpStatus.is2xxSuccessful()) {
             return StatusInfo.ofUp();
         }
         Map<String, Object> details = new LinkedHashMap<>();
-        details.put("status", response.statusCode().value());
-        details.put("error", response.statusCode().getReasonPhrase());
-        details.putAll(body);
+        details.put("status", httpStatus.value());
+        details.put("error", httpStatus.getReasonPhrase());
+        if (body.get("details") instanceof Map) {
+            details.putAll((Map<? extends String, ?>) body.get("details"));
+        } else {
+            details.putAll(body);
+        }
         return StatusInfo.ofDown(details);
     }
 

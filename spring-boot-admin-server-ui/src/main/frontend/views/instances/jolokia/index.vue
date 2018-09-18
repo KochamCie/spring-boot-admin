@@ -28,7 +28,7 @@
       </div>
       <div class="columns">
         <div class="column is-narrow">
-          <nav class="menu domain-list">
+          <nav class="menu domain-list" v-sticks-below="['#navigation', '#instance-tabs']">
             <p class="menu-label">domains</p>
             <ul class="menu-list">
               <li>
@@ -48,12 +48,12 @@
             <header class="m-bean--header hero"
                     :class="{'is-primary': mBean === selectedMBean, 'is-selectable' : mBean !== selectedMBean }"
                     @click="select(selectedDomain, mBean)">
-              <div class="level">
+              <div class="level is-clipped">
                 <div class="level-left">
-                  <div class="level-item"
+                  <div class="level-item is-narrow"
                        v-for="attribute in mBean.descriptor.attributes"
                        :key="`mBean-desc-${attribute.name}`">
-                    <div>
+                    <div class="is-clipped" :title="`${attribute.name} ${attribute.value}`">
                       <p class="heading" v-text="attribute.name"/>
                       <p class="title is-size-6" v-text="attribute.value"/>
                     </div>
@@ -62,7 +62,7 @@
               </div>
               <sba-icon-button v-if="mBean === selectedMBean" :icon="['far', 'times-circle']"
                                class="m-bean--header--close has-text-white"
-                               @click.native.stop="select(selectedDomain)"/>
+                               @click.stop="select(selectedDomain)"/>
               <div class="hero-foot tabs is-boxed" v-if="mBean === selectedMBean">
                 <ul>
                   <li v-if="mBean.attr" :class="{'is-active' : selected.view === 'attributes' }">
@@ -89,6 +89,7 @@
 </template>
 
 <script>
+  import sticksBelow from '@/directives/sticks-below';
   import Instance from '@/services/instance';
   import _ from 'lodash';
   import {directive as onClickaway} from 'vue-clickaway';
@@ -138,7 +139,7 @@
       }
     },
     components: {mBeanOperations, mBeanAttributes},
-    directives: {onClickaway},
+    directives: {onClickaway, sticksBelow},
     data: () => ({
       hasLoaded: false,
       error: null,
@@ -158,17 +159,19 @@
       }
     },
     created() {
-      this.updateSelection();
       this.fetchMBeans();
     },
     watch: {
-      '$route.query'() {
-        this.updateSelection();
+      '$route.query': {
+        immediate: true,
+        handler() {
+          this.selected = this.$route.query;
+        }
       },
       selected() {
         if (!_.isEqual(this.selected, !this.$route.query)) {
           this.$router.replace({
-            name: 'instance/jolokia',
+            name: 'instances/jolokia',
             query: this.selected
           });
         }
@@ -178,32 +181,37 @@
           await this.$nextTick();
           const el = document.getElementById(newVal.descriptor.raw);
           if (el) {
-            const top = el.getBoundingClientRect().top + window.scrollY - 100;
-            window.scroll({top, left: window.scrollX, behavior: 'smooth'});
+            const scrollingEl = document.scrollingElement;
+            const instanceTabs = document.querySelector('#instance-tabs');
+            const navbarOffset = (instanceTabs ? instanceTabs.getBoundingClientRect().bottom : 120) + 10;
+            const top = scrollingEl.scrollTop + el.getBoundingClientRect().top - navbarOffset;
+            if (scrollingEl.scrollTo) {
+              scrollingEl.scrollTo({top, behavior: 'smooth'})
+            } else {
+              scrollingEl.scrollTop = top;
+            }
           }
         }
       }
     },
     methods: {
       async fetchMBeans() {
-        if (this.instance) {
-          this.error = null;
-          try {
-            const res = await this.instance.listMBeans();
-            const domains = _.sortBy(res.data, [d => d.domain]);
-            this.domains = domains.map(domain => ({
-              ...domain,
-              mBeans: _.sortBy(domain.mBeans.map(mBean => new MBean(mBean)), [b => b.descriptor.displayName])
-            }));
-            if (!this.selectedDomain && this.domains.length > 0) {
-              this.select(this.domains[0]);
-            }
-          } catch (error) {
-            console.warn('Fetching MBeans failed:', error);
-            this.error = error;
+        this.error = null;
+        try {
+          const res = await this.instance.listMBeans();
+          const domains = _.sortBy(res.data, [d => d.domain]);
+          this.domains = domains.map(domain => ({
+            ...domain,
+            mBeans: _.sortBy(domain.mBeans.map(mBean => new MBean(mBean)), [b => b.descriptor.displayName])
+          }));
+          if (!this.selectedDomain && this.domains.length > 0) {
+            this.select(this.domains[0]);
           }
-          this.hasLoaded = true;
+        } catch (error) {
+          console.warn('Fetching MBeans failed:', error);
+          this.error = error;
         }
+        this.hasLoaded = true;
       },
       select(domain, mBean, view) {
         this.selected = {
@@ -211,42 +219,62 @@
           mBean: mBean && mBean.descriptor.raw,
           view: view || (mBean ? (mBean.attr ? 'attributes' : (mBean.op ? 'operations' : null)) : null)
         };
-      },
-      updateSelection() {
-        this.selected = this.$route.query;
       }
+    },
+    install({viewRegistry}) {
+      viewRegistry.addView({
+        name: 'instances/jolokia',
+        parent: 'instances',
+        path: 'jolokia',
+        component: this,
+        label: 'JMX',
+        order: 350,
+        isEnabled: ({instance}) => instance.hasEndpoint('jolokia')
+      });
     }
   }
 </script>
 
 <style lang="scss">
-    @import "~@/assets/css/utilities";
+  @import "~@/assets/css/utilities";
 
-    .domain-list {
-        position: sticky;
-        top: (($gap / 2) + $navbar-height-px + $tabs-height-px);
+  .m-bean {
+    transition: all $easing $speed;
+
+    &.is-active {
+      margin: 0.75rem -0.75rem;
+      max-width: unset;
     }
 
-    .m-bean {
-        transition: all $easing $speed;
-
-        &.is-active {
-            margin: 0.75rem -0.75rem;
-            max-width: unset;
-        }
-
-        &.is-active .m-bean--header {
-            padding-bottom: 0;
-        }
-
-        &:not(.is-active) .m-bean--header:hover {
-            background-color: $white-bis;
-        }
-
-        .m-bean--header--close {
-            position: absolute;
-            right: 0.75rem;
-            top: 0.75rem;
-        }
+    &.is-active .m-bean--header {
+      padding-bottom: 0;
     }
+
+    &:not(.is-active) .m-bean--header:hover {
+      background-color: $white-bis;
+    }
+
+    &--header {
+      & .level .level-left {
+        width: 100%;
+
+        & .level-item {
+          min-width: 0;
+          flex-shrink: 1;
+
+          & p {
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+          }
+        }
+      }
+
+      &--close {
+        position: absolute;
+        right: 0.75rem;
+        top: 0.75rem;
+      }
+    }
+  }
 </style>

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import Application from '@/services/application';
-import {Observable} from '@/utils/rxjs';
+import {concat, concatMap, defer, delay, doFirst, map, retryWhen, tap} from '@/utils/rxjs';
 
 export default class {
   constructor() {
@@ -60,7 +60,7 @@ export default class {
     }
   }
 
-  dispatchEvent(type, ...args) {
+  _dispatchEvent(type, ...args) {
     if (!(type in this._listeners)) {
       return;
     }
@@ -71,13 +71,19 @@ export default class {
   }
 
   start() {
-    const listing = Observable.defer(() => Application.list()).concatMap(message => message.data);
-    const stream = Application.getStream().map(message => message.data);
-    this.subscription = listing.concat(stream)
-      .doFirst(() => this.dispatchEvent('connected'))
-      .retryWhen(errors => errors
-        .do(error => this.dispatchEvent('error', error))
-        .delay(5000)
+    const list = defer(() => Application.list())
+      .pipe(concatMap(message => message.data));
+    const stream = Application.getStream()
+      .pipe(map(message => message.data));
+    this.subscription = concat(list, stream)
+      .pipe(
+        doFirst(() => this._dispatchEvent('connected')),
+        retryWhen(
+          errors => errors.pipe(
+            tap(error => this._dispatchEvent('error', error)),
+            delay(5000)
+          )
+        )
       ).subscribe({
         next: application => {
           const idx = this.applications.indexOfApplication(application.name);
@@ -85,14 +91,14 @@ export default class {
             const oldApplication = this.applications[idx];
             if (application.instances.length > 0) {
               this.applications.splice(idx, 1, application);
-              this.dispatchEvent('updated', application, oldApplication);
+              this._dispatchEvent('updated', application, oldApplication);
             } else {
               this.applications.splice(idx, 1);
-              this.dispatchEvent('removed', oldApplication);
+              this._dispatchEvent('removed', oldApplication);
             }
           } else {
             this.applications.push(application);
-            this.dispatchEvent('added', application);
+            this._dispatchEvent('added', application);
           }
         }
       });

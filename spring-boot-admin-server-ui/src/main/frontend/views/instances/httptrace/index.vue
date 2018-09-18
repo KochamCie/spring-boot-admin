@@ -85,7 +85,7 @@
 <script>
   import subscribing from '@/mixins/subscribing';
   import Instance from '@/services/instance';
-  import {Observable} from '@/utils/rxjs';
+  import {concatMap, timer} from '@/utils/rxjs';
   import moment from 'moment';
   import sbaTracesChart from './traces-chart';
   import sbaTracesList from './traces-list';
@@ -110,6 +110,7 @@
       if (contentLength && /^\d+$/.test(contentLength)) {
         return parseInt(contentLength);
       }
+      return null;
     }
 
     get contentType() {
@@ -118,6 +119,7 @@
         const idx = contentType.indexOf(';');
         return idx >= 0 ? contentType.substring(0, idx) : contentType;
       }
+      return null;
     }
 
     compareTo(other) {
@@ -161,10 +163,10 @@
     }),
     computed: {
       actuatorPath() {
-        if (this.instance.registration.managementUrl.indexOf(this.instance.registration.serviceUrl) >= 0) {
+        if (this.instance.registration.managementUrl.includes(this.instance.registration.serviceUrl)) {
           const appendix = this.instance.registration.managementUrl.substring(this.instance.registration.serviceUrl.length);
           if (appendix.length > 0) {
-            return `/${appendix}`;
+            return appendix.startsWith('/') ? appendix : `/${appendix}`;
           }
         }
         return null;
@@ -195,32 +197,30 @@
       },
       createSubscription() {
         const vm = this;
-        if (this.instance) {
-          vm.lastTimestamp = moment(0);
-          vm.error = null;
-          return Observable.timer(0, 5000)
-            .concatMap(vm.fetchHttptrace)
-            .subscribe({
-              next: traces => {
-                vm.hasLoaded = true;
-                vm.traces = vm.traces ? traces.concat(vm.traces) : traces;
-              },
-              error: error => {
-                vm.hasLoaded = true;
-                console.warn('Fetching traces failed:', error);
-                vm.error = error;
-              }
-            });
-        }
+        vm.lastTimestamp = moment(0);
+        vm.error = null;
+        return timer(0, 5000)
+          .pipe(concatMap(vm.fetchHttptrace))
+          .subscribe({
+            next: traces => {
+              vm.hasLoaded = true;
+              vm.traces = vm.traces ? traces.concat(vm.traces) : traces;
+            },
+            error: error => {
+              vm.hasLoaded = true;
+              console.warn('Fetching traces failed:', error);
+              vm.error = error;
+            }
+          });
       },
       getFilterFn() {
         let filterFn = null;
         if (this.actuatorPath !== null && this.excludeActuator) {
-          filterFn = addToFilter(filterFn, (trace) => trace.request.uri.indexOf(this.actuatorPath) < 0);
+          filterFn = addToFilter(filterFn, (trace) => !trace.request.uri.includes(this.actuatorPath));
         }
         if (this.filter) {
           const normalizedFilter = this.filter.toLowerCase();
-          filterFn = addToFilter(filterFn, (trace) => trace.request.uri.toLowerCase().indexOf(normalizedFilter) >= 0);
+          filterFn = addToFilter(filterFn, (trace) => trace.request.uri.toLowerCase().includes(normalizedFilter));
         }
         if (!this.showSuccess) {
           filterFn = addToFilter(filterFn, (trace) => !trace.isSuccess());
@@ -233,6 +233,17 @@
         }
         return filterFn;
       }
+    },
+    install({viewRegistry}) {
+      viewRegistry.addView({
+        name: 'instances/httptrace',
+        parent: 'instances',
+        path: 'httptrace',
+        component: this,
+        label: 'Http Traces',
+        order: 500,
+        isEnabled: ({instance}) => instance.hasEndpoint('httptrace')
+      });
     }
   }
 </script>

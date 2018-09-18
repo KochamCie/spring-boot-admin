@@ -36,13 +36,13 @@
         <div class="level-item has-text-centered">
           <div>
             <p class="heading">Total time spent</p>
-            <p v-text="`${current.total_time.asSeconds()}s`"/>
+            <p v-text="`${current.total_time.asSeconds().toFixed(4)}s`"/>
           </div>
         </div>
         <div class="level-item has-text-centered">
           <div>
             <p class="heading">Max time spent</p>
-            <p v-text="`${current.max.asSeconds()}s`"/>
+            <p v-text="`${current.max.asSeconds().toFixed(4)}s`"/>
           </div>
         </div>
       </div>
@@ -53,8 +53,9 @@
 <script>
   import subscribing from '@/mixins/subscribing';
   import Instance from '@/services/instance';
-  import {Observable} from '@/utils/rxjs';
+  import {concatMap, timer} from '@/utils/rxjs';
   import moment from 'moment';
+  import {toMillis} from '../metrics/metric';
 
   export default {
     props: {
@@ -69,11 +70,6 @@
       error: null,
       current: null,
     }),
-    watch: {
-      dataSource() {
-        this.current = null;
-      }
-    },
     methods: {
       async fetchMetrics() {
         const response = await this.instance.fetchMetric('jvm.gc.pause');
@@ -81,31 +77,30 @@
           (current, measurement) => ({
             ...current,
             [measurement.statistic.toLowerCase()]: measurement.value
-          }), {}
+          }),
+          {}
         );
         return {
           ...measurements,
-          total_time: moment.duration(Math.round(measurements.total_time * 1000)),
-          max: moment.duration(Math.round(measurements.max * 1000)),
+          total_time: moment.duration(toMillis(measurements.total_time, response.baseUnit)),
+          max: moment.duration(toMillis(measurements.max, response.baseUnit)),
         };
       },
       createSubscription() {
         const vm = this;
-        if (this.instance) {
-          return Observable.timer(0, 2500)
-            .concatMap(this.fetchMetrics)
-            .subscribe({
-              next: data => {
-                vm.hasLoaded = true;
-                vm.current = data;
-              },
-              error: error => {
-                vm.hasLoaded = true;
-                console.warn('Fetching GC metrics failed:', error);
-                vm.error = error;
-              }
-            });
-        }
+        return timer(0, 2500)
+          .pipe(concatMap(this.fetchMetrics))
+          .subscribe({
+            next: data => {
+              vm.hasLoaded = true;
+              vm.current = data;
+            },
+            error: error => {
+              vm.hasLoaded = true;
+              console.warn('Fetching GC metrics failed:', error);
+              vm.error = error;
+            }
+          });
       }
     }
   }

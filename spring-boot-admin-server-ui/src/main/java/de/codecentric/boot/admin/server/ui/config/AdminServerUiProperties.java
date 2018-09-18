@@ -27,6 +27,7 @@ import org.springframework.http.CacheControl;
 @ConfigurationProperties("spring.boot.admin.ui")
 public class AdminServerUiProperties {
     private static final String[] CLASSPATH_RESOURCE_LOCATIONS = {"classpath:/META-INF/spring-boot-admin-server-ui/"};
+    private static final String[] CLASSPATH_EXTENSION_RESOURCE_LOCATIONS = {"classpath:/META-INF/spring-boot-admin-server-ui/extensions/"};
 
     /**
      * Locations of SBA ui resources.
@@ -34,9 +35,24 @@ public class AdminServerUiProperties {
     private String[] resourceLocations = CLASSPATH_RESOURCE_LOCATIONS;
 
     /**
+     * Locations of SBA ui exentsion resources.
+     */
+    private String[] extensionResourceLocations = CLASSPATH_EXTENSION_RESOURCE_LOCATIONS;
+
+    /**
      * Locations of SBA ui template.
      */
     private String templateLocation = CLASSPATH_RESOURCE_LOCATIONS[0];
+
+    /**
+     * Page-Title to be shown.
+     */
+    private String title = "Spring Boot Admin";
+
+    /**
+     * Brand to be shown in then navbar.
+     */
+    private String brand = "<img src=\"assets/img/icon-spring-boot-admin.svg\"><span>Spring Boot Admin</span>";
 
     private boolean cacheTemplates = true;
 
@@ -55,6 +71,7 @@ public class AdminServerUiProperties {
          * include "no-cache" directive in Cache-Control http header.
          */
         private Boolean noCache = false;
+
         /**
          * include "no-store" directive in Cache-Control http header.
          */
@@ -73,6 +90,5 @@ public class AdminServerUiProperties {
             return CacheControl.empty();
         }
     }
-
 
 }

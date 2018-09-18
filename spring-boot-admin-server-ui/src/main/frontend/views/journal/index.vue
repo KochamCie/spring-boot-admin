@@ -63,6 +63,7 @@
 <script>
   import subscribing from '@/mixins/subscribing';
   import Instance from '@/services/instance';
+  import {compareBy} from '@/utils/collections';
   import _ from 'lodash';
   import moment from 'moment';
 
@@ -80,7 +81,7 @@
     }
   }
 
-  const component = {
+  export default {
     mixins: [subscribing],
     data: () => ({
       events: [],
@@ -118,22 +119,22 @@
     },
     async created() {
       try {
-        this.addEvents((await Instance.fetchEvents()).data);
+        const response = await Instance.fetchEvents();
+        this.addEvents(response.data.sort(compareBy(v => v.timestamp)));
         this.error = null;
-        this.events.sort((a, b) => b.timestamp - a.timestamp)
       } catch (error) {
         console.warn('Fetching events failed:', error);
         this.error = error;
       }
+    },
+    install({viewRegistry}) {
+      viewRegistry.addView({
+        path: '/journal',
+        name: 'journal',
+        label: 'Journal',
+        order: 100,
+        component: this
+      });
     }
-  };
-
-  export default component;
-  export const view = {
-    path: '/journal',
-    name: 'journal',
-    handle: 'Journal',
-    order: 100,
-    component: component
   };
 </script>

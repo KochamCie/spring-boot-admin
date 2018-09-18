@@ -15,13 +15,13 @@
   -->
 
 <template>
-  <table class="table is-fullwidth">
+  <table class="sessions table is-fullwidth">
     <thead>
       <tr>
-        <th/>
         <th>Session Id</th>
         <th>Created at</th>
         <th>Last accessed at</th>
+        <th>Expiry</th>
         <th>Max. inactive<br>interval
         </th>
         <th>Attributes</th>
@@ -39,14 +39,14 @@
     </thead>
     <tr v-for="session in sessions" :key="session.id">
       <td>
-        <span v-if="session.expired" class="tag is-info">Expired</span>
-      </td>
-      <td>
         <router-link v-text="session.id"
-                     :to="{ name: 'instance/sessions', params: { 'instanceId' : instance.id}, query: { sessionId : session.id } }"/>
+                     :to="{ name: 'instances/sessions', params: { 'instanceId' : instance.id}, query: { sessionId : session.id } }"/>
       </td>
       <td v-text="session.creationTime.format('L HH:mm:ss.SSS')"/>
       <td v-text="session.lastAccessedTime.format('L HH:mm:ss.SSS')"/>
+      <td>
+        <span v-if="session.expired" class="tag is-info">Expired</span>
+      </td>
       <td>
         <span v-if="session.maxInactiveInterval >= 0" v-text="`${session.maxInactiveInterval}s`"/>
         <span v-else>unlimited</span>
@@ -66,14 +66,17 @@
       </td>
     </tr>
     <tr v-if="sessions.length === 0">
-      <td class="is-muted" colspan="7 ">No sessions found.</td>
+      <td class="is-muted" colspan="7 ">
+        <p v-if="isLoading" class="is-loading">Loading Sessions...</p>
+        <p v-else>No Sessions found.</p>
+      </td>
     </tr>
   </table>
 </template>
 
 <script>
   import Instance from '@/services/instance';
-  import {Observable} from '@/utils/rxjs';
+  import {concatMap, from, map, of, tap} from '@/utils/rxjs';
   import prettyBytes from 'pretty-bytes';
 
   export default {
@@ -85,6 +88,10 @@
       instance: {
         type: Instance,
         required: true
+      },
+      isLoading: {
+        type: Boolean,
+        default: false
       }
     },
     data: () => ({
@@ -96,9 +103,11 @@
       deleteAllSessions() {
         const vm = this;
         vm.deletingAll = 'deleting';
-        this.subscription = Observable.from(vm.sessions)
-          .map(session => session.id)
-          .concatMap(vm._deleteSession)
+        vm.subscription = from(vm.sessions)
+          .pipe(
+            map(session => session.id),
+            concatMap(vm._deleteSession)
+          )
           .subscribe({
             complete: () => {
               vm.deletingAll = 'deleted';
@@ -119,19 +128,28 @@
       _deleteSession(sessionId) {
         const vm = this;
         vm.$set(vm.deleting, sessionId, 'deleting');
-        return Observable.of(sessionId)
-          .concatMap(async sessionId => {
-            await vm.instance.deleteSession(sessionId);
-            return sessionId;
-          })
-          .do({
-            next: sessionId => vm.$set(vm.deleting, sessionId, 'deleted'),
-            error: error => {
-              console.warn(`Deleting session ${sessionId} failed:`, error);
-              vm.$set(vm.deleting, sessionId, 'failed');
-            }
-          });
+        return of(sessionId)
+          .pipe(
+            concatMap(async sessionId => {
+              await vm.instance.deleteSession(sessionId);
+              return sessionId;
+            }),
+            tap({
+              next: sessionId => vm.$set(vm.deleting, sessionId, 'deleted'),
+              error: error => {
+                console.warn(`Deleting session ${sessionId} failed:`, error);
+                vm.$set(vm.deleting, sessionId, 'failed');
+              }
+            })
+          );
       }
     }
   }
 </script>
+<style lang="scss">
+  .sessions {
+    & td {
+      vertical-align: middle;
+    }
+  }
+</style>

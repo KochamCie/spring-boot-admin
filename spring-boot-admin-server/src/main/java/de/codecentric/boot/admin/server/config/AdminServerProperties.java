@@ -51,39 +51,12 @@ public class AdminServerProperties {
      * For Spring Boot 1.x applications SBA probes for the specified endpoints using an OPTIONS request.
      * If the path differs from the id you can specify this as id:path (e.g. health:ping).
      */
-    private String[] probedEndpoints = {"health", "env", "metrics", "httptrace:trace", "threaddump:dump", "jolokia",
-        "info", "logfile", "refresh", "flyway", "liquibase", "heapdump", "loggers", "auditevents"};
+    private String[] probedEndpoints = {"health", "env", "metrics", "httptrace:trace", "httptrace", "threaddump:dump",
+        "threaddump", "jolokia", "info", "logfile", "refresh", "flyway", "liquibase", "heapdump", "loggers",
+        "auditevents", "mappings", "scheduledtasks", "configprops"};
 
     public void setContextPath(String contextPath) {
         this.contextPath = PathUtils.normalizePath(contextPath);
-    }
-
-    public String getContextPath() {
-        return contextPath;
-    }
-
-    public MonitorProperties getMonitor() {
-        return monitor;
-    }
-
-    public String[] getMetadataKeysToSanitize() {
-        return metadataKeysToSanitize;
-    }
-
-    public void setMetadataKeysToSanitize(String[] metadataKeysToSanitize) {
-        this.metadataKeysToSanitize = metadataKeysToSanitize;
-    }
-
-    public String[] getProbedEndpoints() {
-        return probedEndpoints;
-    }
-
-    public void setProbedEndpoints(String[] probedEndpoints) {
-        this.probedEndpoints = probedEndpoints;
-    }
-
-    public InstanceProxyProperties getInstanceProxy() {
-        return instanceProxy;
     }
 
     @lombok.Data
@@ -121,13 +94,5 @@ public class AdminServerProperties {
          * Headers not to be forwarded when making requests to clients.
          */
         private Set<String> ignoredHeaders = new HashSet<>(asList("Cookie", "Set-Cookie", "Authorization"));
-
-        public Set<String> getIgnoredHeaders() {
-            return ignoredHeaders;
-        }
-
-        public void setIgnoredHeaders(Set<String> ignoredHeaders) {
-            this.ignoredHeaders = ignoredHeaders;
-        }
     }
 }

@@ -20,18 +20,19 @@ import de.codecentric.boot.admin.server.services.InstanceRegistry;
 import de.codecentric.boot.admin.server.web.AbstractInstancesProxyController;
 import de.codecentric.boot.admin.server.web.AdminController;
 import de.codecentric.boot.admin.server.web.client.InstanceWebClient;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.net.URI;
-import java.time.Duration;
 import java.util.Set;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferFactory;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.core.io.buffer.DefaultDataBufferFactory;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
 import org.springframework.http.server.ServletServerHttpRequest;
@@ -43,7 +44,6 @@ import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.reactive.function.BodyExtractors;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.ClientResponse;
-import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.HandlerMapping;
 import org.springframework.web.util.UriComponentsBuilder;
 
@@ -53,28 +53,23 @@ import org.springframework.web.util.UriComponentsBuilder;
 @AdminController
 public class InstancesProxyController extends AbstractInstancesProxyController {
     private final DataBufferFactory bufferFactory = new DefaultDataBufferFactory();
-    private final Duration readTimeout;
 
     public InstancesProxyController(String adminContextPath,
                                     Set<String> ignoredHeaders,
-                                    InstanceRegistry registry,
-                                    InstanceWebClient instanceWebClient,
-                                    Duration readTimeout) {
+                                    InstanceRegistry registry, InstanceWebClient instanceWebClient) {
         super(adminContextPath, ignoredHeaders, registry, instanceWebClient);
-        this.readTimeout = readTimeout;
     }
 
     @ResponseBody
-    @RequestMapping(path = REQUEST_MAPPING_PATH, method = {RequestMethod.GET, RequestMethod.HEAD, RequestMethod.POST,
-        RequestMethod.PUT, RequestMethod.PATCH, RequestMethod.DELETE, RequestMethod.OPTIONS})
+    @RequestMapping(path = REQUEST_MAPPING_PATH, method = {RequestMethod.GET, RequestMethod.HEAD, RequestMethod.POST, RequestMethod.PUT, RequestMethod.PATCH, RequestMethod.DELETE, RequestMethod.OPTIONS})
     public Mono<Void> endpointProxy(@PathVariable("instanceId") String instanceId,
                                     HttpServletRequest servletRequest,
-                                    HttpServletResponse servletResponse) {
+                                    HttpServletResponse servletResponse) throws IOException {
         ServerHttpRequest request = new ServletServerHttpRequest(servletRequest);
         ServerHttpResponse response = new ServletServerHttpResponse(servletResponse);
 
-        String pathWithinApplication = servletRequest.getAttribute(HandlerMapping.PATH_WITHIN_HANDLER_MAPPING_ATTRIBUTE)
-                                                     .toString();
+        String pathWithinApplication = UriComponentsBuilder.fromPath(
+            servletRequest.getAttribute(HandlerMapping.PATH_WITHIN_HANDLER_MAPPING_ATTRIBUTE).toString()).toUriString();
         String endpointLocalPath = getEndpointLocalPath(pathWithinApplication);
 
         URI uri = UriComponentsBuilder.fromPath(endpointLocalPath)
@@ -82,21 +77,31 @@ public class InstancesProxyController extends AbstractInstancesProxyController {
                                       .build(true)
                                       .toUri();
 
-        //We need to explicitly block until the headers are recieved.
-        // otherwise the FrameworkServlet will add wrong Allow header for OPTIONS request
+        //We need to explicitly block until the headers are recieved and write them before the async dispatch.
+        //otherwise the FrameworkServlet will add wrong Allow header for OPTIONS request
         ClientResponse clientResponse = super.forward(instanceId, uri, request.getMethod(), request.getHeaders(),
             () -> BodyInserters.fromDataBuffers(
-                DataBufferUtils.readInputStream(request::getBody, this.bufferFactory, 16384))).block(this.readTimeout);
+                DataBufferUtils.readInputStream(request::getBody, this.bufferFactory, 4096))).block();
 
         response.setStatusCode(clientResponse.statusCode());
         response.getHeaders().addAll(filterHeaders(clientResponse.headers().asHttpHeaders()));
+        OutputStream responseBody = response.getBody();
+        response.flush();
 
-        try {
-            return DataBufferUtils.write(clientResponse.body(BodyExtractors.toDataBuffers()), response.getBody())
-                                  .map(DataBufferUtils::release)
-                                  .then();
-        } catch (IOException ex) {
-            return Mono.error(new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, null, ex));
-        }
+        return clientResponse.body(BodyExtractors.toDataBuffers())
+                             .window(1)
+                             .flatMap(body -> writeAndFlush(body, responseBody))
+                             .then();
+    }
+
+    private Mono<Void> writeAndFlush(Flux<DataBuffer> body, OutputStream responseBody) {
+        return DataBufferUtils.write(body, responseBody).map(DataBufferUtils::release).then(Mono.create(sink -> {
+            try {
+                responseBody.flush();
+                sink.success();
+            } catch (IOException ex) {
+                sink.error(ex);
+            }
+        }));
     }
 }

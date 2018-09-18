@@ -16,12 +16,15 @@
 
 package de.codecentric.boot.admin.server.web;
 
+import de.codecentric.boot.admin.server.domain.entities.Instance;
 import de.codecentric.boot.admin.server.domain.values.InstanceId;
 import de.codecentric.boot.admin.server.services.InstanceRegistry;
 import de.codecentric.boot.admin.server.web.client.InstanceWebClient;
-import de.codecentric.boot.admin.server.web.client.InstanceWebClientException;
+import de.codecentric.boot.admin.server.web.client.exception.ResolveEndpointException;
+import io.netty.handler.timeout.ReadTimeoutException;
 import reactor.core.publisher.Mono;
 
+import java.io.IOException;
 import java.net.ConnectException;
 import java.net.URI;
 import java.util.Arrays;
@@ -39,26 +42,24 @@ import org.springframework.http.client.reactive.ClientHttpRequest;
 import org.springframework.util.AntPathMatcher;
 import org.springframework.web.reactive.function.BodyInserter;
 import org.springframework.web.reactive.function.client.ClientResponse;
+import org.springframework.web.reactive.function.client.ExchangeStrategies;
 import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.server.ResponseStatusException;
 
 import static java.util.stream.Collectors.toMap;
 
 public class AbstractInstancesProxyController {
     protected static final String REQUEST_MAPPING_PATH = "/instances/{instanceId}/actuator/**";
-    protected static final String[] HOP_BY_HOP_HEADERS = new String[]{"Host", "Connection", "Keep-Alive",
-        "Proxy-Authenticate", "Proxy-Authorization", "TE", "Trailer", "Transfer-Encoding", "Upgrade",
-        "X-Application-Context"};
+    protected static final String[] HOP_BY_HOP_HEADERS = new String[]{"Host", "Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "TE", "Trailer", "Transfer-Encoding", "Upgrade", "X-Application-Context"};
     private static final Logger log = LoggerFactory.getLogger(AbstractInstancesProxyController.class);
     private final String realRequestMappingPath;
     private final InstanceRegistry registry;
     private final InstanceWebClient instanceWebClient;
     private final Set<String> ignoredHeaders;
+    private final ExchangeStrategies strategies = ExchangeStrategies.withDefaults();
 
     public AbstractInstancesProxyController(String adminContextPath,
                                             Set<String> ignoredHeaders,
-                                            InstanceRegistry registry,
-                                            InstanceWebClient instanceWebClient) {
+                                            InstanceRegistry registry, InstanceWebClient instanceWebClient) {
         this.ignoredHeaders = Stream.concat(ignoredHeaders.stream(), Arrays.stream(HOP_BY_HOP_HEADERS))
                                     .map(String::toLowerCase)
                                     .collect(Collectors.toSet());
@@ -72,13 +73,23 @@ public class AbstractInstancesProxyController {
                                            HttpMethod method,
                                            HttpHeaders headers,
                                            Supplier<BodyInserter<?, ? super ClientHttpRequest>> bodyInserter) {
-        log.trace("Proxy-Request for instance {} / {}", instanceId, uri);
+        log.trace("Proxy-Request for instance {} with URL '{}'", instanceId, uri);
 
-        WebClient.RequestBodySpec bodySpec = instanceWebClient.instance(registry.getInstance(InstanceId.of(instanceId)))
+        return registry.getInstance(InstanceId.of(instanceId))
+                       .flatMap(instance -> forward(instance, uri, method, headers, bodyInserter))
+                       .switchIfEmpty(Mono.fromSupplier(
+                           () -> ClientResponse.create(HttpStatus.SERVICE_UNAVAILABLE, strategies).build()));
+    }
+
+    private Mono<ClientResponse> forward(Instance instance,
+                                         URI uri,
+                                         HttpMethod method,
+                                         HttpHeaders headers,
+                                         Supplier<BodyInserter<?, ? super ClientHttpRequest>> bodyInserter) {
+        WebClient.RequestBodySpec bodySpec = instanceWebClient.instance(instance)
                                                               .method(method)
                                                               .uri(uri)
-                                                              .headers(instanceHeaders -> instanceHeaders.addAll(
-                                                                  filterHeaders(headers)));
+                                                              .headers(h -> h.addAll(filterHeaders(headers)));
 
         WebClient.RequestHeadersSpec<?> headersSpec = bodySpec;
         if (requiresBody(method)) {
@@ -89,11 +100,19 @@ public class AbstractInstancesProxyController {
             }
         }
 
-        return headersSpec.exchange()
-                          .onErrorMap(InstanceWebClientException.class,
-                              error -> new ResponseStatusException(HttpStatus.BAD_REQUEST, null, error))
-                          .onErrorMap(ConnectException.class,
-                              error -> new ResponseStatusException(HttpStatus.BAD_GATEWAY, null, error));
+        return headersSpec.exchange().onErrorResume(ReadTimeoutException.class, ex -> Mono.fromSupplier(() -> {
+            log.trace("Timeout for Proxy-Request for instance {} with URL '{}'", instance.getId(), uri);
+            return ClientResponse.create(HttpStatus.GATEWAY_TIMEOUT, strategies).build();
+        })).onErrorResume(ResolveEndpointException.class, ex -> Mono.fromSupplier(() -> {
+            log.trace("No Endpoint found for Proxy-Request for instance {} with URL '{}'", instance.getId(), uri);
+            return ClientResponse.create(HttpStatus.NOT_FOUND, strategies).build();
+        })).onErrorResume(IOException.class, ex -> Mono.fromSupplier(() -> {
+            log.trace("Proxy-Request for instance {} with URL '{}' errored", instance.getId(), uri, ex);
+            return ClientResponse.create(HttpStatus.BAD_GATEWAY, strategies).build();
+        })).onErrorResume(ConnectException.class, ex -> Mono.fromSupplier(() -> {
+            log.trace("Connect for Proxy-Request for instance {} with URL '{}' failed", instance.getId(), uri, ex);
+            return ClientResponse.create(HttpStatus.BAD_GATEWAY, strategies).build();
+        }));
     }
 
     protected String getEndpointLocalPath(String pathWithinApplication) {
@@ -123,5 +142,4 @@ public class AbstractInstancesProxyController {
                 return false;
         }
     }
-
 }

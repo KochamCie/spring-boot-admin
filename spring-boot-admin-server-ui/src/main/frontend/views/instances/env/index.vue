@@ -42,12 +42,12 @@
           <input class="input" type="search" placeholder="name / value filter" v-model="filter">
         </p>
       </div>
-      <sba-panel class="property-source"
+      <sba-panel :header-sticks-below="['#navigation', '#instance-tabs']"
                  v-for="propertySource in propertySources" :key="propertySource.name"
                  :title="propertySource.name">
         <table class="table is-fullwidth"
                v-if="Object.keys(propertySource.properties).length > 0">
-          <tr v-for="(value, name) in propertySource.properties" :key="`${propertySource-name}-${name}`">
+          <tr v-for="(value, name) in propertySource.properties" :key="`${propertySource.name}-${name}`">
             <td>
               <span v-text="name"/><br>
               <small class="is-muted" v-if="value.origin" v-text="value.origin"/>
@@ -67,7 +67,7 @@
   import sbaEnvManager from './env-manager';
 
   const filterProperty = (needle) => (property, name) => {
-    return name.toString().toLowerCase().indexOf(needle) >= 0 || property.value.toString().toLowerCase().indexOf(needle) >= 0;
+    return name.toString().toLowerCase().includes(needle) || property.value.toString().toLowerCase().includes(needle);
   };
   const filterProperties = (needle, properties) => _.pickBy(properties, filterProperty(needle));
   const filterPropertySource = (needle) => (propertySource) => {
@@ -114,38 +114,35 @@
     },
     methods: {
       async fetchEnv() {
-        if (this.instance) {
-          this.error = null;
-          try {
-            const res = await this.instance.fetchEnv();
-            this.env = res.data;
-          } catch (error) {
-            console.warn('Fetching environment failed:', error);
-            this.error = error;
-          }
-          this.hasLoaded = true;
+        this.error = null;
+        try {
+          const res = await this.instance.fetchEnv();
+          this.env = res.data;
+        } catch (error) {
+          console.warn('Fetching environment failed:', error);
+          this.error = error;
         }
+        this.hasLoaded = true;
       },
       async determineEnvManagerSupport() {
-        if (this.instance) {
-          try {
-            this.hasEnvManagerSupport = await this.instance.hasEnvManagerSupport();
-          } catch (error) {
-            console.warn('Determine env manager support failed:', error);
-            this.hasEnvManagerSupport = false;
-          }
+        try {
+          this.hasEnvManagerSupport = await this.instance.hasEnvManagerSupport();
+        } catch (error) {
+          console.warn('Determine env manager support failed:', error);
+          this.hasEnvManagerSupport = false;
         }
       }
+    },
+    install({viewRegistry}) {
+      viewRegistry.addView({
+        name: 'instances/env',
+        parent: 'instances',
+        path: 'env',
+        component: this,
+        label: 'Environment',
+        order: 100,
+        isEnabled: ({instance}) => instance.hasEndpoint('env')
+      });
     }
   }
 </script>
-
-<style lang="scss">
-  @import "~@/assets/css/utilities";
-
-  .property-source .card-header {
-    position: sticky;
-    background: $white;
-    top: ($navbar-height-px + $tabs-height-px);
-  }
-</style>

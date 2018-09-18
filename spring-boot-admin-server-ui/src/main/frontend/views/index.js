@@ -14,44 +14,15 @@
  * limitations under the License.
  */
 
-import {view as aboutView} from './about';
-import {view as applicationView} from './applications';
-import instanceViews from './instances';
-import {view as journalView} from './journal';
+const views = [];
 
-export default router => {
-  const views = [];
-  views.register = view => {
-    if (view.handle) {
-      if (typeof view.handle === 'string') {
-        const label = view.handle;
-        view.handle = {
-          render() {
-            return this._v(label)
-          }
-        }
-      }
-      views.push(view);
-    }
+/* global require */
+const context = require.context('.', true, /^\.\/.+\/index\.(js|vue)$/);
+context.keys().forEach(function (key) {
+  const defaultExport = context(key).default;
+  if (defaultExport && defaultExport.install) {
+    views.push(defaultExport)
+  }
+});
 
-    if (view.component) {
-      router.addRoutes([{
-          path: view.path,
-          children: view.children,
-          component: view.component,
-          props: view.props,
-          name: view.name
-        }]
-      )
-    }
-  };
-
-  views.register(applicationView);
-  views.register(journalView);
-  views.register(aboutView);
-  instanceViews.forEach(views.register);
-
-  router.addRoutes([{path: '/', redirect: {name: 'applications'}}]);
-
-  return views;
-}
+export default views;

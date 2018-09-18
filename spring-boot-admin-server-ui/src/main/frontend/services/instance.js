@@ -14,19 +14,31 @@
  * limitations under the License.
  */
 
-import axios from '@/utils/axios';
+import axios, {redirectOn401} from '@/utils/axios';
 import waitForPolyfill from '@/utils/eventsource-polyfill';
 import logtail from '@/utils/logtail';
-import {Observable} from '@/utils/rxjs'
+import {concat, from, ignoreElements, Observable} from '@/utils/rxjs';
+import uri from '@/utils/uri';
 import _ from 'lodash';
 
-const actuatorMimeTypes = ['application/vnd.spring-boot.actuator.v2+json',
+const actuatorMimeTypes = [
+  'application/vnd.spring-boot.actuator.v2+json',
   'application/vnd.spring-boot.actuator.v1+json',
-  'application/json'];
+  'application/json'
+];
+
+const isInstanceActuatorRequest = url => url.match(/^instances[/][^/]+[/]actuator([/].*)?$/);
 
 class Instance {
   constructor(id) {
     this.id = id;
+    this.axios = axios.create({
+      baseURL: uri`instances/${this.id}/`,
+    });
+    this.axios.interceptors.response.use(
+      response => response,
+      redirectOn401(error => !isInstanceActuatorRequest(error.config.url))
+    );
   }
 
   hasEndpoint(endpointId) {
@@ -38,129 +50,153 @@ class Instance {
   }
 
   async unregister() {
-    return axios.delete(`instances/${this.id}`);
+    return this.axios.delete('');
   }
 
   async fetchInfo() {
-    return axios.get(`instances/${this.id}/actuator/info`, {
+    return this.axios.get(uri`actuator/info`, {
       headers: {'Accept': actuatorMimeTypes}
     });
   }
 
   async fetchMetrics() {
-    return axios.get(`instances/${this.id}/actuator/metrics`, {
+    return this.axios.get(uri`actuator/metrics`, {
       headers: {'Accept': actuatorMimeTypes}
     });
   }
 
   async fetchMetric(metric, tags) {
-    const params = tags ? {tag: _.entries(tags).map(([name, value]) => `${name}:${value}`).join(',')} : {};
-    return axios.get(`instances/${this.id}/actuator/metrics/${metric}`, {
+    const params = tags ? {
+      tag: _.entries(tags)
+        .filter(([, value]) => typeof value !== 'undefined' && value !== null)
+        .map(([name, value]) => `${name}:${value}`)
+        .join(',')
+    } : {};
+    return this.axios.get(uri`actuator/metrics/${metric}`, {
       headers: {'Accept': actuatorMimeTypes},
       params
     });
   }
 
   async fetchHealth() {
-    return axios.get(`instances/${this.id}/actuator/health`, {
+    try {
+      return await this.axios.get(uri`actuator/health`, {
+        headers: {'Accept': actuatorMimeTypes}
+      });
+    } catch (error) {
+      if (error.response) {
+        return error.response;
+      }
+      throw error;
+    }
+  }
+
+  async fetchEnv(name) {
+    return this.axios.get(uri`actuator/env/${name || '' }`, {
       headers: {'Accept': actuatorMimeTypes}
     });
   }
 
-  async fetchEnv(name) {
-    return axios.get(`instances/${this.id}/actuator/env${name ? `/${name}` : '' }`, {
+  async fetchConfigprops() {
+    return this.axios.get(uri`actuator/configprops`, {
       headers: {'Accept': actuatorMimeTypes}
     });
   }
 
   async hasEnvManagerSupport() {
-    const response = await axios.options(`instances/${this.id}/actuator/env`);
-    return response.headers['allow'] && response.headers['allow'].indexOf('POST') >= 0;
+    const response = await this.axios.options(uri`actuator/env`);
+    return response.headers['allow'] && response.headers['allow'].includes('POST');
   }
 
   async resetEnv() {
-    return axios.delete(`instances/${this.id}/actuator/env`);
+    return this.axios.delete(uri`actuator/env`);
   }
 
   async setEnv(name, value) {
-    return axios.post(`instances/${this.id}/actuator/env`, {name, value}, {
+    return this.axios.post(uri`actuator/env`, {name, value}, {
       headers: {'Content-Type': 'application/json'}
     });
   }
 
   async refreshContext() {
-    return axios.post(`instances/${this.id}/actuator/refresh`);
+    return this.axios.post(uri`actuator/refresh`);
   }
 
   async fetchLiquibase() {
-    return axios.get(`instances/${this.id}/actuator/liquibase`, {
+    return this.axios.get(uri`actuator/liquibase`, {
+      headers: {'Accept': actuatorMimeTypes}
+    });
+  }
+
+  async fetchScheduledTasks() {
+    return this.axios.get(uri`actuator/scheduledtasks`, {
       headers: {'Accept': actuatorMimeTypes}
     });
   }
 
   async fetchFlyway() {
-    return axios.get(`instances/${this.id}/actuator/flyway`, {
+    return this.axios.get(uri`actuator/flyway`, {
       headers: {'Accept': actuatorMimeTypes}
     });
   }
 
   async fetchLoggers() {
-    return axios.get(`instances/${this.id}/actuator/loggers`, {
+    return this.axios.get(uri`actuator/loggers`, {
       headers: {'Accept': actuatorMimeTypes},
       transformResponse: Instance._toLoggers
     });
   }
 
   async configureLogger(name, level) {
-    return axios.post(`instances/${this.id}/actuator/loggers/${name}`, {configuredLevel: level}, {
+    return this.axios.post(uri`actuator/loggers/${name}`, {configuredLevel: level}, {
       headers: {'Content-Type': 'application/json'}
     });
   }
 
   async fetchHttptrace() {
-    return axios.get(`instances/${this.id}/actuator/httptrace`, {
+    return this.axios.get(uri`actuator/httptrace`, {
       headers: {'Accept': actuatorMimeTypes}
     });
   }
 
   async fetchThreaddump() {
-    return axios.get(`instances/${this.id}/actuator/threaddump`, {
+    return this.axios.get(uri`actuator/threaddump`, {
       headers: {'Accept': actuatorMimeTypes}
     });
   }
 
   async fetchAuditevents(after) {
-    return axios.get(`instances/${this.id}/actuator/auditevents`, {
+    return this.axios.get(uri`actuator/auditevents`, {
       headers: {'Accept': actuatorMimeTypes},
       params: {after: after.toISOString()}
     });
   }
 
-  async fetchSessions(username) {
-    return axios.get(`instances/${this.id}/actuator/sessions`, {
+  async fetchSessionsByUsername(username) {
+    return this.axios.get(uri`actuator/sessions`, {
       headers: {'Accept': actuatorMimeTypes},
       params: {username}
     });
   }
 
   async fetchSession(sessionId) {
-    return axios.get(`instances/${this.id}/actuator/sessions/${sessionId}`, {
+    return this.axios.get(uri`actuator/sessions/${sessionId}`, {
       headers: {'Accept': actuatorMimeTypes}
     });
   }
 
   async deleteSession(sessionId) {
-    return axios.delete(`instances/${this.id}/actuator/sessions/${sessionId}`, {
+    return this.axios.delete(uri`actuator/sessions/${sessionId}`, {
       headers: {'Accept': actuatorMimeTypes}
     });
   }
 
   streamLogfile(interval) {
-    return logtail(`instances/${this.id}/actuator/logfile`, interval);
+    return logtail(opt => this.axios.get(uri`actuator/logfile`, opt), interval);
   }
 
   async listMBeans() {
-    return axios.get(`instances/${this.id}/actuator/jolokia/list`, {
+    return this.axios.get(uri`actuator/jolokia/list`, {
       headers: {'Accept': 'application/json'},
       params: {canonicalNaming: false},
       transformResponse: Instance._toMBeans
@@ -173,7 +209,7 @@ class Instance {
       mbean: `${domain}:${mBean}`,
       config: {ignoreErrors: true}
     };
-    return axios.post(`instances/${this.id}/actuator/jolokia`, body, {
+    return this.axios.post(uri`actuator/jolokia`, body, {
       headers: {'Accept': 'application/json', 'Content-Type': 'application/json'}
     });
   }
@@ -185,7 +221,7 @@ class Instance {
       attribute,
       value
     };
-    return axios.post(`instances/${this.id}/actuator/jolokia`, body, {
+    return this.axios.post(uri`actuator/jolokia`, body, {
       headers: {'Accept': 'application/json', 'Content-Type': 'application/json'}
     });
   }
@@ -197,8 +233,14 @@ class Instance {
       operation,
       'arguments': args
     };
-    return axios.post(`instances/${this.id}/actuator/jolokia`, body, {
+    return this.axios.post(uri`actuator/jolokia`, body, {
       headers: {'Accept': 'application/json', 'Content-Type': 'application/json'}
+    });
+  }
+
+  async fetchMappings() {
+    return this.axios.get(uri`actuator/mappings`, {
+      headers: {'Accept': actuatorMimeTypes}
     });
   }
 
@@ -207,21 +249,24 @@ class Instance {
   }
 
   static getEventStream() {
-    return Observable.from(waitForPolyfill()).ignoreElements().concat(Observable.create(observer => {
-      const eventSource = new EventSource('instances/events');
-      eventSource.onmessage = message => observer.next({
-        ...message,
-        data: JSON.parse(message.data)
-      });
-      eventSource.onerror = err => observer.error(err);
-      return () => {
-        eventSource.close();
-      };
-    }));
+    return concat(
+      from(waitForPolyfill()).pipe(ignoreElements()),
+      Observable.create(observer => {
+        const eventSource = new EventSource('instances/events');
+        eventSource.onmessage = message => observer.next({
+          ...message,
+          data: JSON.parse(message.data)
+        });
+        eventSource.onerror = err => observer.error(err);
+        return () => {
+          eventSource.close();
+        };
+      })
+    );
   }
 
   static async get(id) {
-    return axios.get(`instances/${id}`, {
+    return axios.get(uri`instances/${id}`, {
       transformResponse: Instance._toInstance
     });
   }

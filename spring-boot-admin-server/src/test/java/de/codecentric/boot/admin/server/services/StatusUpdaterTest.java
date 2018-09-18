@@ -25,35 +25,49 @@ import de.codecentric.boot.admin.server.domain.values.Registration;
 import de.codecentric.boot.admin.server.eventstore.ConcurrentMapEventStore;
 import de.codecentric.boot.admin.server.eventstore.InMemoryEventStore;
 import de.codecentric.boot.admin.server.web.client.InstanceWebClient;
+import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 import java.time.Duration;
+import org.junit.AfterClass;
 import org.junit.Before;
-import org.junit.ClassRule;
+import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
+import org.springframework.boot.actuate.endpoint.http.ActuatorMediaType;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import com.github.tomakehurst.wiremock.core.Options;
-import com.github.tomakehurst.wiremock.junit.WireMockClassRule;
+import com.github.tomakehurst.wiremock.http.Fault;
+import com.github.tomakehurst.wiremock.junit.WireMockRule;
 
+import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.ok;
+import static com.github.tomakehurst.wiremock.client.WireMock.okForContentType;
 import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.status;
+import static java.util.Collections.singletonMap;
 import static org.assertj.core.api.Assertions.assertThat;
 
 public class StatusUpdaterTest {
-    @ClassRule
-    public static WireMockClassRule wireMockClass = new WireMockClassRule(Options.DYNAMIC_PORT);
     @Rule
-    public WireMockClassRule wireMock = wireMockClass;
+    public WireMockRule wireMock = new WireMockRule(Options.DYNAMIC_PORT);
 
     private StatusUpdater updater;
     private ConcurrentMapEventStore eventStore;
     private InstanceRepository repository;
     private Instance instance;
 
+    @BeforeClass
+    public static void setUp() {
+        StepVerifier.setDefaultTimeout(Duration.ofSeconds(5));
+    }
+
+    @AfterClass
+    public static void tearDown() {
+        StepVerifier.resetDefaultTimeout();
+    }
     @Before
     public void setup() {
         eventStore = new InMemoryEventStore();
@@ -63,14 +77,15 @@ public class StatusUpdaterTest {
         StepVerifier.create(repository.save(instance)).expectNextCount(1).verifyComplete();
 
         updater = new StatusUpdater(repository,
-            new InstanceWebClient(instance -> HttpHeaders.EMPTY, Duration.ofSeconds(5), Duration.ofSeconds(20)));
+            new InstanceWebClient(instance -> HttpHeaders.EMPTY, Duration.ofSeconds(5), Duration.ofSeconds(10)));
     }
 
     @Test
-    public void test_update_statusChanged() {
-        String body = "{ \"status\" : \"UP\" }";
-        wireMock.stubFor(
-            get("/health").willReturn(okJson(body).withHeader("Content-Length", Integer.toString(body.length()))));
+    public void should_change_status_to_down() {
+        String body = "{ \"status\" : \"UP\", \"details\" : { \"foo\" : \"bar\" } }";
+        wireMock.stubFor(get("/health").willReturn(
+            okForContentType(ActuatorMediaType.V2_JSON, body).withHeader("Content-Length",
+                Integer.toString(body.length()))));
 
         StepVerifier.create(eventStore)
                     .expectSubscription()
@@ -80,6 +95,8 @@ public class StatusUpdaterTest {
                         assertThat(event.getInstance()).isEqualTo(instance.getId());
                         InstanceStatusChangedEvent statusChangedEvent = (InstanceStatusChangedEvent) event;
                         assertThat(statusChangedEvent.getStatusInfo().getStatus()).isEqualTo("UP");
+                        assertThat(statusChangedEvent.getStatusInfo().getDetails()).isEqualTo(
+                            singletonMap("foo", "bar"));
                     })
                     .thenCancel()
                     .verify();
@@ -87,10 +104,20 @@ public class StatusUpdaterTest {
         StepVerifier.create(repository.find(instance.getId()))
                     .assertNext(app -> assertThat(app.getStatusInfo().getStatus()).isEqualTo("UP"))
                     .verifyComplete();
+
+        StepVerifier.create(
+            repository.computeIfPresent(instance.getId(), (key, instance) -> Mono.just(instance.deregister())))
+                    .then(() -> StepVerifier.create(updater.updateStatus(instance.getId())).verifyComplete())
+                    .thenCancel()
+                    .verify();
+
+        StepVerifier.create(repository.find(instance.getId()))
+                    .assertNext(app -> assertThat(app.getStatusInfo().getStatus()).isEqualTo("UNKNOWN"))
+                    .verifyComplete();
     }
 
     @Test
-    public void test_update_statusUnchanged() {
+    public void should_not_change_status() {
         String body = "{ \"status\" : \"UNKNOWN\" }";
         wireMock.stubFor(
             get("/health").willReturn(okJson(body).withHeader("Content-Type", Integer.toString(body.length()))));
@@ -105,7 +132,7 @@ public class StatusUpdaterTest {
     }
 
     @Test
-    public void test_update_up_noBody() {
+    public void should_change_status_to_up() {
         wireMock.stubFor(get("/health").willReturn(ok()));
 
         StepVerifier.create(eventStore)
@@ -121,7 +148,7 @@ public class StatusUpdaterTest {
     }
 
     @Test
-    public void test_update_down() {
+    public void should_change_status_to_down_with_details() {
         String body = "{ \"foo\" : \"bar\" }";
         wireMock.stubFor(get("/health").willReturn(
             status(503).withHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
@@ -142,7 +169,7 @@ public class StatusUpdaterTest {
     }
 
     @Test
-    public void test_update_down_noBody() {
+    public void should_change_status_to_down_without_details_incompatible_content_type() {
         wireMock.stubFor(get("/health").willReturn(status(503)));
 
         StepVerifier.create(eventStore)
@@ -152,6 +179,24 @@ public class StatusUpdaterTest {
                     .thenCancel()
                     .verify();
 
+        StepVerifier.create(repository.find(instance.getId())).assertNext(app -> {
+            assertThat(app.getStatusInfo().getStatus()).isEqualTo("DOWN");
+            assertThat(app.getStatusInfo().getDetails()).containsEntry("status", 503)
+                                                        .containsEntry("error", "Service Unavailable");
+        }).verifyComplete();
+    }
+
+    @Test
+    public void should_change_status_to_down_without_details_no_body() {
+        wireMock.stubFor(
+            get("/health").willReturn(status(503).withHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)));
+
+        StepVerifier.create(eventStore)
+                    .expectSubscription()
+                    .then(() -> StepVerifier.create(updater.updateStatus(instance.getId())).verifyComplete())
+                    .assertNext(event -> assertThat(event).isInstanceOf(InstanceStatusChangedEvent.class))
+                    .thenCancel()
+                    .verify();
 
         StepVerifier.create(repository.find(instance.getId())).assertNext(app -> {
             assertThat(app.getStatusInfo().getStatus()).isEqualTo("DOWN");
@@ -161,22 +206,21 @@ public class StatusUpdaterTest {
     }
 
     @Test
-    public void test_update_offline() {
-        Instance offlineInstance = Instance.create(InstanceId.of("offline"))
-                                           .register(Registration.create("foo", "http://0.0.0.0/health").build());
-
-        StepVerifier.create(repository.save(offlineInstance)).expectNextCount(1).verifyComplete();
+    public void should_change_status_to_offline() {
+        wireMock.stubFor(get("/health").willReturn(aResponse().withFault(Fault.EMPTY_RESPONSE)));
 
         StepVerifier.create(eventStore)
                     .expectSubscription()
-                    .then(() -> StepVerifier.create(updater.updateStatus(offlineInstance.getId())).verifyComplete())
+                    .then(() -> StepVerifier.create(updater.updateStatus(instance.getId())).verifyComplete())
                     .assertNext(event -> assertThat(event).isInstanceOf(InstanceStatusChangedEvent.class))
                     .thenCancel()
                     .verify();
 
-        StepVerifier.create(repository.find(offlineInstance.getId())).assertNext(app -> {
+        StepVerifier.create(repository.find(instance.getId())).assertNext(app -> {
             assertThat(app.getStatusInfo().getStatus()).isEqualTo("OFFLINE");
             assertThat(app.getStatusInfo().getDetails()).containsKeys("message", "exception");
         }).verifyComplete();
+
+        StepVerifier.create(updater.updateStatus(instance.getId())).verifyComplete();
     }
 }

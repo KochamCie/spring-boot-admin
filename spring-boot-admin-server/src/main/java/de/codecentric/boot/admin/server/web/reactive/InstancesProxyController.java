@@ -40,13 +40,11 @@ import org.springframework.web.util.UriComponentsBuilder;
 public class InstancesProxyController extends AbstractInstancesProxyController {
     public InstancesProxyController(String adminContextPath,
                                     Set<String> ignoredHeaders,
-                                    InstanceRegistry registry,
-                                    InstanceWebClient instanceWebClient) {
+                                    InstanceRegistry registry, InstanceWebClient instanceWebClient) {
         super(adminContextPath, ignoredHeaders, registry, instanceWebClient);
     }
 
-    @RequestMapping(path = REQUEST_MAPPING_PATH, method = {RequestMethod.GET, RequestMethod.HEAD, RequestMethod.POST,
-        RequestMethod.PUT, RequestMethod.PATCH, RequestMethod.DELETE, RequestMethod.OPTIONS})
+    @RequestMapping(path = REQUEST_MAPPING_PATH, method = {RequestMethod.GET, RequestMethod.HEAD, RequestMethod.POST, RequestMethod.PUT, RequestMethod.PATCH, RequestMethod.DELETE, RequestMethod.OPTIONS})
     public Mono<Void> endpointProxy(@PathVariable("instanceId") String instanceId,
                                     ServerHttpRequest request,
                                     ServerHttpResponse response) {
@@ -60,7 +58,7 @@ public class InstancesProxyController extends AbstractInstancesProxyController {
             () -> BodyInserters.fromDataBuffers(request.getBody())).flatMap(clientResponse -> {
             response.setStatusCode(clientResponse.statusCode());
             response.getHeaders().addAll(filterHeaders(clientResponse.headers().asHttpHeaders()));
-            return response.writeWith(clientResponse.body(BodyExtractors.toDataBuffers()));
+            return response.writeAndFlushWith(clientResponse.body(BodyExtractors.toDataBuffers()).window(1));
         });
     }
 }

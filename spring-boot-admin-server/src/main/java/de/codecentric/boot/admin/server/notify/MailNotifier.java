@@ -21,28 +21,27 @@ import de.codecentric.boot.admin.server.domain.entities.InstanceRepository;
 import de.codecentric.boot.admin.server.domain.events.InstanceEvent;
 import reactor.core.publisher.Mono;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
-import org.springframework.context.expression.MapAccessor;
-import org.springframework.expression.Expression;
-import org.springframework.expression.ParserContext;
-import org.springframework.expression.spel.standard.SpelExpressionParser;
-import org.springframework.expression.spel.support.StandardEvaluationContext;
-import org.springframework.mail.MailSender;
-import org.springframework.mail.SimpleMailMessage;
+import javax.mail.MessagingException;
+import javax.mail.internet.MimeMessage;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
+import org.thymeleaf.TemplateEngine;
+import org.thymeleaf.context.Context;
+
+import static java.util.Collections.singleton;
 
 /**
- * Notifier sending emails.
+ * Notifier sending emails using thymleaf templates.
  *
  * @author Johannes Edmeier
  */
 public class MailNotifier extends AbstractStatusChangeNotifier {
-    private static final String DEFAULT_SUBJECT = "#{instance.registration.name} (#{instance.id}) is #{event.statusInfo.status}";
-    private static final String DEFAULT_TEXT = "#{instance.registration.name} (#{instance.id})\nstatus changed from #{lastStatus} to #{event.statusInfo.status}\n\n#{instance.registration.healthUrl}";
-
-    private final SpelExpressionParser parser = new SpelExpressionParser();
-    private final MailSender sender;
+    private final JavaMailSender mailSender;
+    private final TemplateEngine templateEngine;
 
     /**
      * recipients of the mail
@@ -52,47 +51,65 @@ public class MailNotifier extends AbstractStatusChangeNotifier {
     /**
      * cc-recipients of the mail
      */
-    private String[] cc;
+    private String[] cc = {};
 
     /**
      * sender of the change
      */
-    private String from = null;
+    private String from = "Spring Boot Admin <noreply@localhost>";
 
     /**
-     * Mail Text. SpEL template using event as root;
+     * Additional properties to be set for the template
      */
-    private Expression text;
+    private Map<String, Object> additionalProperties = new HashMap<>();
 
     /**
-     * Mail Subject. SpEL template using event as root;
+     * Base-URL used for hyperlinks in mail
      */
-    private Expression subject;
+    private String baseUrl;
 
-    public MailNotifier(MailSender sender, InstanceRepository repository) {
+    /**
+     * Thymleaf template for mail
+     */
+    private String template = "classpath:/META-INF/spring-boot-admin-server/mail/status-changed.html";
+
+    public MailNotifier(JavaMailSender mailSender, InstanceRepository repository, TemplateEngine templateEngine) {
         super(repository);
-        this.sender = sender;
-        this.subject = parser.parseExpression(DEFAULT_SUBJECT, ParserContext.TEMPLATE_EXPRESSION);
-        this.text = parser.parseExpression(DEFAULT_TEXT, ParserContext.TEMPLATE_EXPRESSION);
+        this.mailSender = mailSender;
+        this.templateEngine = templateEngine;
     }
 
     @Override
     protected Mono<Void> doNotify(InstanceEvent event, Instance instance) {
-        Map<String, Object> root = new HashMap<>();
-        root.put("event", event);
-        root.put("instance", instance);
-        root.put("lastStatus", getLastStatus(event.getInstance()));
-        StandardEvaluationContext context = new StandardEvaluationContext(root);
-        context.addPropertyAccessor(new MapAccessor());
+        return Mono.fromRunnable(() -> {
+            Context ctx = new Context();
+            ctx.setVariables(additionalProperties);
+            ctx.setVariable("baseUrl", this.baseUrl);
+            ctx.setVariable("event", event);
+            ctx.setVariable("instance", instance);
+            ctx.setVariable("lastStatus", getLastStatus(event.getInstance()));
 
-        SimpleMailMessage message = new SimpleMailMessage();
-        message.setTo(to);
-        message.setFrom(from);
-        message.setSubject(subject.getValue(context, String.class));
-        message.setText(text.getValue(context, String.class));
-        message.setCc(cc);
+            try {
+                MimeMessage mimeMessage = mailSender.createMimeMessage();
+                MimeMessageHelper message = new MimeMessageHelper(mimeMessage, StandardCharsets.UTF_8.name());
+                message.setText(getBody(ctx).replaceAll("\\s+\\n", "\n"), true);
+                message.setSubject(getSubject(ctx));
+                message.setTo(this.to);
+                message.setCc(this.cc);
+                message.setFrom(this.from);
+                mailSender.send(mimeMessage);
+            } catch (MessagingException ex) {
+                throw new RuntimeException("Error sending mail notification", ex);
+            }
+        });
+    }
 
-        return Mono.fromRunnable(() -> sender.send(message));
+    protected String getBody(Context ctx) {
+        return templateEngine.process(this.template, ctx);
+    }
+
+    protected String getSubject(Context ctx) {
+        return templateEngine.process(this.template, singleton("subject"), ctx).trim();
     }
 
     public void setTo(String[] to) {
@@ -119,20 +136,27 @@ public class MailNotifier extends AbstractStatusChangeNotifier {
         return from;
     }
 
-    public void setSubject(String subject) {
-        this.subject = parser.parseExpression(subject, ParserContext.TEMPLATE_EXPRESSION);
+    public String getTemplate() {
+        return template;
     }
 
-    public String getSubject() {
-        return subject.getExpressionString();
+    public void setTemplate(String template) {
+        this.template = template;
     }
 
-    public void setText(String text) {
-        this.text = parser.parseExpression(text, ParserContext.TEMPLATE_EXPRESSION);
+    public String getBaseUrl() {
+        return baseUrl;
     }
 
-    public String getText() {
-        return text.getExpressionString();
+    public void setBaseUrl(String baseUrl) {
+        this.baseUrl = baseUrl;
     }
 
+    public Map<String, Object> getAdditionalProperties() {
+        return additionalProperties;
+    }
+
+    public void setAdditionalProperties(Map<String, Object> additionalProperties) {
+        this.additionalProperties = additionalProperties;
+    }
 }

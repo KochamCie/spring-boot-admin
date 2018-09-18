@@ -15,19 +15,16 @@
   -->
 
 <template>
-  <section class="hero is-primary instance-header" id="instance-menu">
+  <section class="hero">
     <div class="hero-body">
       <div class="container">
         <div class="columns">
-          <div class="column is-narrow">
+          <div class="column">
             <h1 class="title" v-if="instance" v-text="instance.registration.name"/>
             <h2 class="subtitle" v-if="instance">
               Instance <strong v-text="instance.id"/> (of <span v-text="application.instances.length"/>)
             </h2>
-          </div>
-          <div class="column">
-            <sba-status v-if="instance" :status="instance.statusInfo.status"
-                        :date="instance.statusTimestamp"/>
+            <sba-tags v-if="instance" :tags="instance.tags"/>
           </div>
           <div class="column is-narrow is-hidden-mobile">
             <h2 class="subtitle is-6" v-if="instance">
@@ -59,6 +56,6 @@
         type: Application,
         default: null
       }
-    }
+    },
   }
 </script>

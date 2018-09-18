@@ -23,6 +23,7 @@
     <meta name="format-detection" content="telephone=no,email=no">
     <meta name="theme-color" content="#42d3a5">
     <link rel="shortcut icon" href="assets/img/favicon.png" type="image/png">
+    <link rel="preload" href="assets/css/sba-core.css" as="style">
     <link href="assets/css/sba-core.css" rel="stylesheet">
     <title>Spring Boot Admin - Login</title>
 </head>
@@ -38,6 +39,10 @@
                     </figure>
                     <h1 class="title has-text-primary">Spring Boot Admin</h1>
                     <form method="post">
+                        <input type="hidden"
+                               th:if="${_csrf}"
+                               th:name="${_csrf.parameterName}"
+                               th:value="${_csrf.token}"/>
                         <div class="field">
                             <p class="is-medium has-text-danger" th:unless="${param.error == null}">
                                 Invalid username or password

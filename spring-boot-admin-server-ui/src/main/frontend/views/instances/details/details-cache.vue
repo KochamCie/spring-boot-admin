@@ -45,7 +45,7 @@
             <p v-text="ratio"/>
           </div>
         </div>
-        <div class="level-item has-text-centered">
+        <div v-if="current.size" class="level-item has-text-centered">
           <div>
             <p class="heading">Size</p>
             <p v-text="current.size"/>
@@ -60,7 +60,7 @@
 <script>
   import subscribing from '@/mixins/subscribing';
   import Instance from '@/services/instance';
-  import {Observable} from '@/utils/rxjs';
+  import {concatMap, timer} from '@/utils/rxjs';
   import moment from 'moment';
   import cacheChart from './cache-chart';
 
@@ -81,6 +81,7 @@
       hasLoaded: false,
       error: null,
       current: null,
+      disableSize: false,
       chartData: [],
     }),
     computed: {
@@ -91,20 +92,22 @@
         return '-';
       }
     },
-    watch: {
-      dataSource() {
-        this.current = null;
-        this.chartData = [];
-      }
-    },
     methods: {
       async fetchMetrics() {
         const responseHit = this.instance.fetchMetric('cache.gets', {name: this.cacheName, result: 'hit'});
         const responseMiss = this.instance.fetchMetric('cache.gets', {name: this.cacheName, result: 'miss'});
-        const responsSize = this.instance.fetchMetric('cache.size', {name: this.cacheName});
+        let size = undefined;
+        if (!this.disableSize) {
+          const responsSize = this.instance.fetchMetric('cache.size', {name: this.cacheName});
+          try {
+            size = (await responsSize).data.measurements[0].value;
+          } catch (error) {
+            this.disableSize = true;
+            console.warn('Fetching cache size failed - error is ignored', error)
+          }
+        }
         const hit = (await responseHit).data.measurements[0].value;
         const miss = (await responseMiss).data.measurements[0].value;
-        const size = (await responsSize).data.measurements[0].value;
         return {
           hit,
           miss,
@@ -114,22 +117,20 @@
       },
       createSubscription() {
         const vm = this;
-        if (this.instance) {
-          return Observable.timer(0, 2500)
-            .concatMap(vm.fetchMetrics)
-            .subscribe({
-              next: data => {
-                vm.hasLoaded = true;
-                vm.current = data;
-                vm.chartData.push({...data, timestamp: moment.now().valueOf()});
-              },
-              error: error => {
-                vm.hasLoaded = true;
-                console.warn(`Fetching cache ${vm.cacheName} metrics failed:`, error);
-                vm.error = error;
-              }
-            });
-        }
+        return timer(0, 2500)
+          .pipe(concatMap(vm.fetchMetrics))
+          .subscribe({
+            next: data => {
+              vm.hasLoaded = true;
+              vm.current = data;
+              vm.chartData.push({...data, timestamp: moment.now().valueOf()});
+            },
+            error: error => {
+              vm.hasLoaded = true;
+              console.warn(`Fetching cache ${vm.cacheName} metrics failed:`, error);
+              vm.error = error;
+            }
+          });
       }
     }
   }

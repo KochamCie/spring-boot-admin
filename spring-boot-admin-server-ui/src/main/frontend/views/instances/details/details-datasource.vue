@@ -55,7 +55,7 @@
 <script>
   import subscribing from '@/mixins/subscribing';
   import Instance from '@/services/instance';
-  import {Observable} from '@/utils/rxjs';
+  import {concatMap, timer} from '@/utils/rxjs';
   import moment from 'moment';
   import datasourceChart from './datasource-chart';
 
@@ -78,12 +78,6 @@
       current: null,
       chartData: [],
     }),
-    watch: {
-      dataSource() {
-        this.current = null;
-        this.chartData = [];
-      }
-    },
     methods: {
       async fetchMetrics() {
         const responseActive = this.instance.fetchMetric('data.source.active.connections', {name: this.dataSource});
@@ -98,22 +92,20 @@
       },
       createSubscription() {
         const vm = this;
-        if (this.instance) {
-          return Observable.timer(0, 2500)
-            .concatMap(vm.fetchMetrics)
-            .subscribe({
-              next: data => {
-                vm.hasLoaded = true;
-                vm.current = data;
-                vm.chartData.push({...data, timestamp: moment.now().valueOf()});
-              },
-              error: error => {
-                vm.hasLoaded = true;
-                console.warn(`Fetching datasource ${vm.dataSource} metrics failed:`, error);
-                vm.error = error;
-              }
-            });
-        }
+        return timer(0, 2500)
+          .pipe(concatMap(vm.fetchMetrics))
+          .subscribe({
+            next: data => {
+              vm.hasLoaded = true;
+              vm.current = data;
+              vm.chartData.push({...data, timestamp: moment.now().valueOf()});
+            },
+            error: error => {
+              vm.hasLoaded = true;
+              console.warn(`Fetching datasource ${vm.dataSource} metrics failed:`, error);
+              vm.error = error;
+            }
+          });
       }
     }
   }

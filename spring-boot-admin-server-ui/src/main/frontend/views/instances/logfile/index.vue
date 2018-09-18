@@ -27,12 +27,12 @@
     </div>
     <div class="logfile-view-actions" v-if="hasLoaded">
       <div class="logfile-view-actions__navigation">
-        <sba-icon-button :disabled="atTop" @click.native="scrollToTop" icon="step-backward" size="lg"
+        <sba-icon-button :disabled="atTop" @click="scrollToTop" icon="step-backward" size="lg"
                          icon-class="rotated"/>
-        <sba-icon-button :disabled="atBottom" @click.native="scrollToBottom" icon="step-forward" size="lg"
+        <sba-icon-button :disabled="atBottom" @click="scrollToBottom" icon="step-forward" size="lg"
                          icon-class="rotated"/>
       </div>
-      <a class="button" v-if="instance" :href="`instances/${instance.id}/logfile`" target="_blank">
+      <a class="button" :href="`instances/${instance.id}/actuator/logfile`" target="_blank">
         <font-awesome-icon icon="download"/>&nbsp;Download
       </a>
     </div>
@@ -44,7 +44,9 @@
 <script>
   import subscribing from '@/mixins/subscribing';
   import Instance from '@/services/instance';
-  import {animationFrame, Observable} from '@/utils/rxjs';
+  import autolink from '@/utils/autolink';
+  import {animationFrameScheduler, concatAll, concatMap, map, of, tap} from '@/utils/rxjs';
+  import AnsiUp from 'ansi_up';
   import _ from 'lodash';
   import prettyBytes from 'pretty-bytes';
 
@@ -64,10 +66,9 @@
       skippedBytes: null
     }),
     created() {
-      this.scrollParent = null;
+      this.ansiUp = new AnsiUp();
     },
     mounted() {
-      this.scrollParent = document.documentElement;
       window.addEventListener('scroll', this.onScroll);
     },
     beforeDestroy() {
@@ -77,44 +78,57 @@
       prettyBytes,
       createSubscription() {
         const vm = this;
-        if (this.instance) {
-          vm.error = null;
-          return this.instance.streamLogfile(1000)
-            .do(chunk => vm.skippedBytes = vm.skippedBytes || chunk.skipped)
-            .concatMap(chunk => _.chunk(chunk.addendum.split(/\r?\n/), 250))
-            .map(lines => Observable.of(lines, animationFrame))
-            .concatAll()
-            .subscribe({
-              next: lines => {
-                vm.hasLoaded = true;
-                lines.forEach(line => {
-                  const child = document.createElement('pre');
-                  child.textContent = line;
-                  vm.$el.appendChild(child);
-                });
+        vm.error = null;
+        return this.instance.streamLogfile(1000)
+          .pipe(
+            tap(chunk => vm.skippedBytes = vm.skippedBytes || chunk.skipped),
+            concatMap(chunk => _.chunk(chunk.addendum.split(/\r?\n/), 250)),
+            map(lines => of(lines, animationFrameScheduler)),
+            concatAll()
+          )
+          .subscribe({
+            next: lines => {
+              vm.hasLoaded = true;
+              lines.forEach(line => {
+                const child = document.createElement('pre');
+                child.innerHTML = autolink(this.ansiUp.ansi_to_html(line));
+                vm.$el.appendChild(child);
+              });
 
-                if (vm.atBottom) {
-                  vm.scrollToBottom();
-                }
-              },
-              error: error => {
-                vm.hasLoaded = true;
-                console.warn('Fetching logfile failed:', error);
-                vm.error = error;
+              if (vm.atBottom) {
+                vm.scrollToBottom();
               }
-            });
-        }
+            },
+            error: error => {
+              vm.hasLoaded = true;
+              console.warn('Fetching logfile failed:', error);
+              vm.error = error;
+            }
+          });
       },
       onScroll() {
-        this.atBottom = this.scrollParent.scrollTop >= this.scrollParent.scrollHeight - this.scrollParent.clientHeight;
-        this.atTop = this.scrollParent.scrollTop === 0;
+        const scrollingEl = document.scrollingElement;
+        const visibleHeight = document.documentElement.clientHeight;
+        this.atBottom = visibleHeight === scrollingEl.scrollHeight - scrollingEl.scrollTop;
+        this.atTop = scrollingEl.scrollTop <= 0;
       },
       scrollToTop() {
-        this.scrollParent.scrollTo(this.scrollParent.scrollLeft, 0);
+        document.scrollingElement.scrollTop = 0;
       },
       scrollToBottom() {
-        this.scrollParent.scrollTo(this.scrollParent.scrollLeft, (this.scrollParent.scrollHeight - this.scrollParent.clientHeight))
+        document.scrollingElement.scrollTop = document.scrollingElement.scrollHeight;
       }
+    },
+    install({viewRegistry}) {
+      viewRegistry.addView({
+        name: 'instances/logfile',
+        parent: 'instances',
+        path: 'logfile',
+        component: this,
+        label: 'Logfile',
+        order: 200,
+        isEnabled: ({instance}) => instance.hasEndpoint('logfile')
+      });
     }
   }
 </script>

@@ -29,7 +29,6 @@ import java.util.Collections;
 import java.util.List;
 import javax.servlet.ServletContext;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.actuate.autoconfigure.endpoint.web.WebEndpointProperties;
 import org.springframework.boot.actuate.autoconfigure.endpoint.web.servlet.WebMvcEndpointManagementContextConfiguration;
 import org.springframework.boot.actuate.autoconfigure.web.server.ManagementServerProperties;
@@ -38,6 +37,7 @@ import org.springframework.boot.autoconfigure.AutoConfigureAfter;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.autoconfigure.web.ServerProperties;
+import org.springframework.boot.autoconfigure.web.servlet.DispatcherServletPath;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.context.annotation.Bean;
@@ -46,8 +46,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
-import org.springframework.scheduling.TaskScheduler;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 import static org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication.Type;
 
@@ -69,9 +67,11 @@ public class SpringBootAdminClientAutoConfiguration {
                                                      ServletContext servletContext,
                                                      PathMappedEndpoints pathMappedEndpoints,
                                                      WebEndpointProperties webEndpoint,
-                                                     MetadataContributor metadataContributor) {
+                                                     MetadataContributor metadataContributor,
+                                                     DispatcherServletPath dispatcherServletPath) {
             return new ServletApplicationFactory(instance, management, server, servletContext, pathMappedEndpoints,
-                webEndpoint, metadataContributor);
+                webEndpoint, metadataContributor, dispatcherServletPath
+            );
         }
     }
 
@@ -98,8 +98,8 @@ public class SpringBootAdminClientAutoConfiguration {
                                               RestTemplateBuilder restTemplBuilder) {
         RestTemplateBuilder builder = restTemplBuilder.messageConverters(new MappingJackson2HttpMessageConverter())
                                                       .requestFactory(SimpleClientHttpRequestFactory.class)
-                                                      .setConnectTimeout((int) client.getConnectTimeout().toMillis())
-                                                      .setReadTimeout((int) client.getReadTimeout().toMillis());
+                                                      .setConnectTimeout(client.getConnectTimeout())
+                                                      .setReadTimeout(client.getReadTimeout());
         if (client.getUsername() != null) {
             builder = builder.basicAuthorization(client.getUsername(), client.getPassword());
         }
@@ -107,21 +107,10 @@ public class SpringBootAdminClientAutoConfiguration {
     }
 
     @Bean
-    @Qualifier("registrationTaskScheduler")
-    public TaskScheduler registrationTaskScheduler() {
-        ThreadPoolTaskScheduler taskScheduler = new ThreadPoolTaskScheduler();
-        taskScheduler.setPoolSize(1);
-        taskScheduler.setRemoveOnCancelPolicy(true);
-        taskScheduler.setThreadNamePrefix("registrationTask");
-        return taskScheduler;
-    }
-
-    @Bean
     @ConditionalOnMissingBean
     public RegistrationApplicationListener registrationListener(ClientProperties client,
                                                                 ApplicationRegistrator registrator) {
-        RegistrationApplicationListener listener = new RegistrationApplicationListener(registrator,
-            registrationTaskScheduler());
+        RegistrationApplicationListener listener = new RegistrationApplicationListener(registrator);
         listener.setAutoRegister(client.isAutoRegistration());
         listener.setAutoDeregister(client.isAutoDeregistration());
         listener.setRegisterPeriod(client.getPeriod());

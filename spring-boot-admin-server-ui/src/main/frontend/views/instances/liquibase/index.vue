@@ -29,7 +29,8 @@
       <template v-for="(context, ctxName) in contexts">
         <h3 class="title" v-text="ctxName" :key="ctxName"/>
         <template v-for="(report, name) in context.liquibaseBeans">
-          <sba-panel :key="`${ctxName}-${name}`" :title="`name`" class="change-set">
+          <sba-panel :key="`${ctxName}-${name}`" :title="`name`" class="change-set"
+                     :header-sticks-below="['#navigation', '#instance-tabs']">
             <table class="table is-hoverable is-fullwidth">
               <thead>
                 <tr>
@@ -115,17 +116,15 @@
     },
     methods: {
       async fetchLiquibase() {
-        if (this.instance) {
-          this.error = null;
-          try {
-            const res = await this.instance.fetchLiquibase();
-            this.contexts = res.data.contexts;
-          } catch (error) {
-            console.warn('Fetching Liquibase changeSets failed:', error);
-            this.error = error;
-          }
-          this.hasLoaded = true;
+        this.error = null;
+        try {
+          const res = await this.instance.fetchLiquibase();
+          this.contexts = res.data.contexts;
+        } catch (error) {
+          console.warn('Fetching Liquibase changeSets failed:', error);
+          this.error = error;
         }
+        this.hasLoaded = true;
       },
       execClass(execType) {
         switch (execType) {
@@ -142,16 +141,17 @@
             return 'is-info';
         }
       }
+    },
+    install({viewRegistry}) {
+      viewRegistry.addView({
+        name: 'instances/liquibase',
+        parent: 'instances',
+        path: 'liquibase',
+        component: this,
+        label: 'Liquibase',
+        order: 900,
+        isEnabled: ({instance}) => instance.hasEndpoint('liquibase')
+      });
     }
   }
-</script>
-
-<style lang="scss">
-  @import "~@/assets/css/utilities";
-
-  .change-set .card-header {
-    position: sticky;
-    background: $white;
-    top: ($navbar-height-px + $tabs-height-px);
-  }
-</style>
+</script>å

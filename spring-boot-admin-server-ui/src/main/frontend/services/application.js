@@ -14,9 +14,10 @@
  * limitations under the License.
  */
 
-import axios from '@/utils/axios';
+import axios, {redirectOn401} from '@/utils/axios';
 import waitForPolyfill from '@/utils/eventsource-polyfill';
-import {Observable} from '@/utils/rxjs';
+import {concat, from, ignoreElements, Observable} from '@/utils/rxjs';
+import uri from '@/utils/uri';
 import * as _ from 'lodash';
 import Instance from './instance';
 
@@ -24,6 +25,13 @@ class Application {
 
   constructor(name) {
     this.name = name;
+    this.axios = axios.create({
+      baseURL: uri`applications/${this.name}/`
+    });
+    this.axios.interceptors.response.use(
+      response => response,
+      redirectOn401()
+    );
   }
 
   findInstance(instanceId) {
@@ -35,7 +43,7 @@ class Application {
   }
 
   async unregister() {
-    return axios.delete(`applications/${this.name}`)
+    return this.axios.delete('')
   }
 
   static async list() {
@@ -45,7 +53,8 @@ class Application {
   }
 
   static getStream() {
-    return Observable.from(waitForPolyfill()).ignoreElements().concat(
+    return concat(
+      from(waitForPolyfill()).pipe(ignoreElements()),
       Observable.create(observer => {
         const eventSource = new EventSource('applications');
         eventSource.onmessage = message => observer.next({
@@ -57,7 +66,8 @@ class Application {
         return () => {
           eventSource.close();
         };
-      }));
+      })
+    );
   }
 
   static _transformResponse(data) {

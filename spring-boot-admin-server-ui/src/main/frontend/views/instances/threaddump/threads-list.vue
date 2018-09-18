@@ -15,7 +15,7 @@
   -->
 
 <template>
-  <table class="threads table is-fullwidth">
+  <table class="threads table is-fullwidth is-hoverable">
     <thead>
       <tr>
         <th class="threads__thread-name">Name</th>
@@ -39,7 +39,7 @@
         <tr :key="`${thread.threadId}-detail`"
             v-if="showDetails[thread.threadId]">
           <td colspan="2">
-            <table class="table is-narrow">
+            <table class="threads__thread-details table is-narrow is-fullwidth has-background-white-ter">
               <tr>
                 <td>Thread Id</td>
                 <td v-text="thread.threadId"/>
@@ -83,7 +83,7 @@
                 </tr>
                 <tr v-if="thread.details.stackTrace.length > 0">
                   <td colspan="2">Stacktrace
-                    <pre><template
+                    <pre class="threads__thread-stacktrace"><template
                       v-for="(frame, idx) in thread.details.stackTrace"><span
                       :key="`frame-${thread.threadId}-${idx}`"
                       v-text="`${frame.className}.${frame.methodName}(${frame.fileName}:${frame.lineNumber})`"/> <span
@@ -122,15 +122,11 @@
     components: {
       threadTag
     },
-    mounted() {
-      this.drawTimelines(this.threadTimelines);
-    },
     watch: {
       threadTimelines: {
         deep: true,
-        handler(newVal) {
-          this.drawTimelines(newVal);
-        }
+        handler: 'drawTimelines',
+        immediate: true
       }
     },
     methods: {
@@ -187,55 +183,67 @@
       },
       isInView(xPos) {
         const scrollable = this.$el;
-        return xPos >= scrollable.scrollLeft && xPos <= scrollable.scrollLeft + scrollable.clientWidth;
+        return scrollable && xPos >= scrollable.scrollLeft && xPos <= (scrollable.scrollLeft + scrollable.clientWidth);
       }
     }
   }
 </script>
 <style lang="scss">
-    @import "~@/assets/css/utilities";
+  @import "~@/assets/css/utilities";
 
-    .threads {
-        table-layout: fixed;
+  .threads {
+    table-layout: fixed;
 
-        &__thread-name {
-            width: 250px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        &__timeline {
-            width: auto;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            padding-left: 0 !important;
-            padding-right: 0 !important;
-
-            & svg {
-                display: block; //prevent margin bottom on svg
-            }
-        }
-
-        &__scale {
-            & .domain {
-                display: none;
-            }
-        }
+    &__thread-name {
+      width: 250px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
-    .thread {
-        &--runnable {
-            fill: $success;
-        }
+    &__thread-details {
+      table-layout: fixed;
 
-        &--timed_waiting,
-        &--waiting {
-            fill: $warning;
-        }
-
-        &--blocked {
-            fill: $danger;
-        }
+      & td:first-child:not(.threads__thread-stacktrace) {
+        width: 20%;
+      }
     }
+    &__thread-stacktrace {
+      overflow: auto;
+      max-height: 300px;
+    }
+
+    &__timeline {
+      width: auto;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      padding-left: 0 !important;
+      padding-right: 0 !important;
+
+      & svg {
+        display: block; //prevent margin bottom on svg
+      }
+    }
+
+    &__scale {
+      & .domain {
+        display: none;
+      }
+    }
+  }
+
+  .thread {
+    &--runnable {
+      fill: $success;
+    }
+
+    &--timed_waiting,
+    &--waiting {
+      fill: $warning;
+    }
+
+    &--blocked {
+      fill: $danger;
+    }
+  }
 </style>

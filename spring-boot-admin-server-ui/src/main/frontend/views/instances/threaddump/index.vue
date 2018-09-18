@@ -34,7 +34,7 @@
 <script>
   import subscribing from '@/mixins/subscribing';
   import Instance from '@/services/instance';
-  import {Observable} from '@/utils/rxjs';
+  import {concatMap, timer} from '@/utils/rxjs';
   import _ from 'lodash';
   import moment from 'moment-shortformat';
   import threadsList from './threads-list';
@@ -111,22 +111,31 @@
       createSubscription() {
         const vm = this;
         vm.error = null;
-        if (this.instance) {
-          return Observable.timer(0, 1000)
-            .concatMap(vm.fetchThreaddump)
-            .subscribe({
-              next: threads => {
-                vm.hasLoaded = true;
-                vm.updateTimelines(threads);
-              },
-              error: error => {
-                vm.hasLoaded = true;
-                console.warn('Fetching threaddump failed:', error);
-                vm.error = error;
-              }
-            });
-        }
+        return timer(0, 1000)
+          .pipe(concatMap(vm.fetchThreaddump))
+          .subscribe({
+            next: threads => {
+              vm.hasLoaded = true;
+              vm.updateTimelines(threads);
+            },
+            error: error => {
+              vm.hasLoaded = true;
+              console.warn('Fetching threaddump failed:', error);
+              vm.error = error;
+            }
+          });
       }
+    },
+    install({viewRegistry}) {
+      viewRegistry.addView({
+        name: 'instances/threaddump',
+        parent: 'instances',
+        path: 'threaddump',
+        component: this,
+        label: 'Threads',
+        order: 400,
+        isEnabled: ({instance}) => instance.hasEndpoint('threaddump')
+      });
     }
   }
 </script>

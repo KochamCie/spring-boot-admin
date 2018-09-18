@@ -26,6 +26,11 @@
           <p v-text="error.message"/>
         </div>
       </div>
+      <div v-if="isOldAuditevents" class="message is-warning">
+        <div class="message-body">
+          Audit Log is not supported for Spring Boot 1.x applications.
+        </div>
+      </div>
       <auditevents-list v-if="events" :instance="instance" :events="events"/>
     </div>
   </section>
@@ -34,7 +39,7 @@
 <script>
   import subscribing from '@/mixins/subscribing';
   import Instance from '@/services/instance';
-  import {Observable} from '@/utils/rxjs';
+  import {concatMap, timer} from '@/utils/rxjs';
   import AuditeventsList from '@/views/instances/auditevents/auditevents-list';
   import _ from 'lodash';
   import moment from 'moment';
@@ -58,11 +63,11 @@
     }
 
     isSuccess() {
-      return this.type.toLowerCase().indexOf('success') >= 0;
+      return this.type.toLowerCase().includes('success');
     }
 
     isFailure() {
-      return this.type.toLowerCase().indexOf('failure') >= 0;
+      return this.type.toLowerCase().includes('failure');
     }
   }
 
@@ -79,6 +84,7 @@
       hasLoaded: false,
       error: null,
       events: null,
+      isOldAuditevents: false
     }),
     methods: {
       async fetchAuditevents() {
@@ -92,27 +98,42 @@
       },
       createSubscription() {
         const vm = this;
-        if (this.instance) {
-          vm.lastTimestamp = moment(0);
-          vm.error = null;
-          return Observable.timer(0, 5000)
-            .concatMap(this.fetchAuditevents)
-            .subscribe({
-              next: events => {
-                vm.hasLoaded = true;
-                vm.addEvents(events);
-              },
-              error: error => {
-                vm.hasLoaded = true;
-                console.warn('Fetching audit events failed:', error);
+        vm.lastTimestamp = moment(0);
+        vm.error = null;
+        return timer(0, 5000)
+          .pipe(
+            concatMap(this.fetchAuditevents)
+          )
+          .subscribe({
+            next: events => {
+              vm.hasLoaded = true;
+              vm.addEvents(events);
+            },
+            error: error => {
+              vm.hasLoaded = true;
+              console.warn('Fetching audit events failed:', error);
+              if (error.response.headers['content-type'].includes('application/vnd.spring-boot.actuator.v2')) {
                 vm.error = error;
+              } else {
+                vm.isOldAuditevents = true;
               }
-            });
-        }
+            }
+          });
       },
       addEvents(events) {
         this.events = _.uniqBy(this.events ? events.concat(this.events) : events, event => event.key);
       }
+    },
+    install({viewRegistry}) {
+      viewRegistry.addView({
+        name: 'instances/auditevents',
+        parent: 'instances',
+        path: 'auditevents',
+        component: this,
+        label: 'Audit Log',
+        order: 600,
+        isEnabled: ({instance}) => instance.hasEndpoint('auditevents')
+      });
     }
   }
 </script>

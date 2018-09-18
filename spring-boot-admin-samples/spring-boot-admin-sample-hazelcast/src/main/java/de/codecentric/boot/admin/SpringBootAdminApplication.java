@@ -27,16 +27,17 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
 import org.springframework.security.web.authentication.SavedRequestAwareAuthenticationSuccessHandler;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import com.hazelcast.config.Config;
 import com.hazelcast.config.EvictionPolicy;
 import com.hazelcast.config.InMemoryFormat;
 import com.hazelcast.config.MapConfig;
 
-// tag::application-hazelcast[]
 @Configuration
 @EnableAutoConfiguration
 @EnableAdminServer
 public class SpringBootAdminApplication {
+    // tag::application-hazelcast[]
     @Bean
     public Config hazelcastConfig() {
         MapConfig mapConfig = new MapConfig("spring-boot-admin-event-store").setInMemoryFormat(InMemoryFormat.OBJECT)
@@ -44,14 +45,26 @@ public class SpringBootAdminApplication {
                                                                             .setEvictionPolicy(EvictionPolicy.NONE);
         return new Config().setProperty("hazelcast.jmx", "true").addMapConfig(mapConfig);
     }
+    // end::application-hazelcast[]
 
     @Profile("insecure")
     @Configuration
     public static class SecurityPermitAllConfig extends WebSecurityConfigurerAdapter {
+        private final String adminContextPath;
+
+        public SecurityPermitAllConfig(AdminServerProperties adminServerProperties) {
+            this.adminContextPath = adminServerProperties.getContextPath();
+        }
+
         @Override
         protected void configure(HttpSecurity http) throws Exception {
-            http.authorizeRequests().anyRequest().permitAll()//
-                .and().csrf().disable();
+            http.authorizeRequests()
+                .anyRequest()
+                .permitAll()
+                .and()
+                .csrf()
+                .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                .ignoringAntMatchers(adminContextPath + "/instances", adminContextPath + "/actuator/**");
         }
     }
 
@@ -69,6 +82,7 @@ public class SpringBootAdminApplication {
             // @formatter:off
             SavedRequestAwareAuthenticationSuccessHandler successHandler = new SavedRequestAwareAuthenticationSuccessHandler();
             successHandler.setTargetUrlParameter("redirectTo");
+            successHandler.setDefaultTargetUrl(adminContextPath + "/");
 
             http.authorizeRequests()
                 .antMatchers(adminContextPath + "/assets/**").permitAll()
@@ -78,7 +92,9 @@ public class SpringBootAdminApplication {
             .formLogin().loginPage(adminContextPath + "/login").successHandler(successHandler).and()
             .logout().logoutUrl(adminContextPath + "/logout").and()
             .httpBasic().and()
-            .csrf().disable();
+            .csrf()
+                .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                .ignoringAntMatchers(adminContextPath + "/instances", adminContextPath + "/actuator/**");
             // @formatter:on
         }
     }
@@ -88,4 +104,3 @@ public class SpringBootAdminApplication {
     }
 
 }
-// end::application-hazelcast[]

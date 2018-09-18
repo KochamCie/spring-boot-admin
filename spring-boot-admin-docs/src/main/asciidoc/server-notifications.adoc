@@ -13,64 +13,36 @@ By default the reminders are sent every 10 minutes, to change this use `setRemin
 [source,java]
 ----
 @Configuration
-@EnableScheduling
 public class NotifierConfiguration {
     @Autowired
     private Notifier notifier;
 
-    @Bean
     @Primary
+    @Bean(initMethod = "start", destroyMethod = "stop")
     public RemindingNotifier remindingNotifier() {
-        RemindingNotifier remindingNotifier = new RemindingNotifier(notifier);
-        remindingNotifier.setReminderPeriod(TimeUnit.MINUTES.toMillis(5)); // <1>
-        return remindingNotifier;
-    }
-
-    @Scheduled(fixedRate = 60_000L) // <2>
-    public void remind() {
-        remindingNotifier().sendReminders();
+        RemindingNotifier notifier = new RemindingNotifier(notifier, repository);
+        notifier.setReminderPeriod(Duration.ofMinutes(10)); // <1>
+        notifier.setCheckReminderInverval(Duration.ofSeconds(10)); //<2>
+        return notifier;
     }
 }
 ----
-<1> The reminders will be sent every 5 minutes.
-<2> Schedules sending of due reminders every 60 seconds.
+<1> The reminders will be sent every 10 minutes.
+<2> Schedules sending of due reminders every 10 seconds.
 
 
 [[filtering-notifications]]
 ==== Filtering notifications ====
 The `FilteringNotifier` allows you to filter certain notification based on rules you can add/remove at runtime. It delegates the sending of notifications to another notifier.
 
-If you add a `FilteringNotifier` to your `ApplicationContext` a RESTful interface on `api/notifications/filter` gets available.
+If you add a `FilteringNotifier` to your `ApplicationContext` a RESTful interface on `notifications/filter` gets available.
 
 This notifier is useful if you don't want recieve notifications when deploying your applications. Before stopping the application you can add an (expiring) filter either via a `POST` request.
 
 .How to configure filtering
-[source,java]
+[source,java,indent=0]
 ----
-@Configuration
-@EnableScheduling
-public class NotifierConfiguration {
-	@Autowired
-	private Notifier delegate;
-
-	@Bean
-	public FilteringNotifier filteringNotifier() { // <1>
-		return new FilteringNotifier(delegate);
-	}
-
-	@Bean
-	@Primary
-	public RemindingNotifier remindingNotifier() { // <2>
-		RemindingNotifier notifier = new RemindingNotifier(filteringNotifier());
-		notifier.setReminderPeriod(TimeUnit.SECONDS.toMillis(10));
-		return notifier;
-	}
-
-	@Scheduled(fixedRate = 1_000L)
-	public void remind() {
-		remindingNotifier().sendReminders();
-	}
-}
+include::{samples-dir}/spring-boot-admin-sample-servlet/src/main/java/de/codecentric/boot/admin/SpringBootAdminApplication.java[tags=configuration-filtering-notifier]
 ----
 <1> Add the `FilteringNotifier` bean using a delegate (e.g. `MailNotifier` when configured)
 <2> Add the `RemindingNotifier` as primary bean using the `FilteringNotifier` as delegate.
@@ -81,8 +53,17 @@ TIP: This example combines the reminding and filtering notifiers. This allows yo
 [[mail-notifications]]
 ==== Mail notifications ====
 
-Configure a `JavaMailSender` using `spring-boot-starter-mail` and set a recipient.
+Mail notifications will be delivered as HTML emails rendered using https://www.thymeleaf.org/[Thymeleaf] templates.
+To enable Mail notifications, configure a `JavaMailSender` using `spring-boot-starter-mail` and set a recipient.
 
+.Sample Mail Notification
+image::mail-notification-sample.png[Sample Mail Notification]
+
+NOTE: To prevent disclosure of sensitive information, the default mail template doesn't show any metadata of
+the instance. If you want to you show some of the metadata you can use a custom template.
+
+. Add spring-boot-starter-mail to your dependencies:
++
 [source,xml]
 .pom.xml
 ----
@@ -92,12 +73,16 @@ Configure a `JavaMailSender` using `spring-boot-starter-mail` and set a recipien
 </dependency>
 ----
 
+. Configure a JavaMailSender
++
 .application.properties
 ----
 spring.mail.host=smtp.example.com
 spring.boot.admin.notify.mail.to=admin@example.com
 ----
 
+. Configure the mail with the options below
++
 .Mail notifications configuration options
 |===
 | Property name |Description |Default value
@@ -110,6 +95,10 @@ spring.boot.admin.notify.mail.to=admin@example.com
 | Comma-delimited list of status changes to be ignored. Format: "<from-status>:<to-status>". Wildcards allowed.
 | `"UNKNOWN:UP"`
 
+| spring.boot.admin.notify.mail.template
+| Resource path to the Thymelef template used for rendering.
+| `"classpath:/META-INF/spring-boot-admin-server/mail/status-changed.html"`
+
 | spring.boot.admin.notify.mail.to
 | Comma-delimited list of mail recipients
 | `"root@localhost"`
@@ -120,17 +109,13 @@ spring.boot.admin.notify.mail.to=admin@example.com
 
 | spring.boot.admin.notify.mail.from
 | Mail sender
+| `"Spring Boot Admin <noreply@localhost>"`
+
+| spring.boot.admin.notify.mail.additional-properties
+| Additional properties which can be accessed from the template
 |
 
-| spring.boot.admin.notify.mail.subject
-| Mail subject. SpEL-expressions are supported
-| `+++"#{application.name} (#{application.id}) is #{to.status}"+++`
-
-| spring.boot.admin.notify.mail.text
-| Mail body. SpEL-expressions are supported
-| `+++"#{application.name} (#{application.id})\nstatus changed from #{from.status} to #{to.status}\n\n#{application.healthUrl}"+++`
 |===
-
 
 [[pagerduty-notifications]]
 ==== PagerDuty notifications ====
@@ -158,7 +143,7 @@ To enable https://www.pagerduty.com/[PagerDuty] notifications you just have to a
 
 | spring.boot.admin.notify.pagerduty.description
 | Description to use in the event. SpEL-expressions are supported
-| `+++"#{application.name}/#{application.id} is #{to.status}"+++`
+| `+++"#{instance.registration.name}/#{instance.id} is #{instance.statusInfo.status}"+++`
 
 | spring.boot.admin.notify.pagerduty.client
 | Client-name to use in the event
@@ -192,15 +177,11 @@ To enable https://www.opsgenie.com/[OpsGenie] notifications you just have to add
 
 | spring.boot.admin.notify.opsgenie.url
 | OpsGenie Alert API url
-| `+++"https://api.opsgenie.com/v1/json/alert"+++`
+| `+++"https://api.opsgenie.com/v2/alerts"+++`
 
 | spring.boot.admin.notify.opsgenie.description
 | Description to use in the event. SpEL-expressions are supported
-| `+++"#{application.name}/#{application.id} is #{to.status}"+++`
-
-| spring.boot.admin.notify.opsgenie.recipients
-| User, group, schedule or escalation names to calculate which users will receive the notifications of the alert.
-|
+| `+++"#{instance.registration.name}/#{instance.id} is #{instance.statusInfo.status}"+++`
 
 | spring.boot.admin.notify.opsgenie.actions
 | Comma separated list of actions that can be executed.
@@ -258,7 +239,7 @@ To enable https://www.hipchat.com/[Hipchat] notifications you need to create an 
 
 | spring.boot.admin.notify.hipchat.description
 | Description to use in the event. SpEL-expressions are supported
-| `+++"&lt;strong&gt;#{application.name}&lt;/strong&gt;/#{application.id} is &lt;strong&gt;#{to.status}&lt;/strong&gt;"+++`
+| `+++"&lt;strong&gt;#{instance.registration.name}&lt;/strong&gt;/#{instance.id} is &lt;strong&gt;#{event.statusInfo.status}&lt;/strong&gt;"+++`
 |
 |===
 
@@ -298,7 +279,7 @@ account and configure it appropriately.
 
 | spring.boot.admin.notify.slack.message
 | Message to use in the event. SpEL-expressions and Slack markups are supported
-| `+++"*#{application.name}* (#{application.id}) is *#{to.status}*"+++`
+| `+++"*#{instance.registration.name}* (#{instance.id}) is *#{event.statusInfo.status}*"+++`
 |
 |===
 
@@ -337,7 +318,7 @@ To enable https://sdelements.github.io/lets-chat/[Let's Chat] notifications you 
 
 | spring.boot.admin.notify.letschat.message
 | Message to use in the event. SpEL-expressions are supported
-| `+++"*#{application.name}* (#{application.id}) is *#{to.status}*"+++`
+| `+++"*#{instance.registration.name}* (#{instance.id}) is *#{event.statusInfo.status}*"+++`
 |
 |===
 
@@ -394,5 +375,5 @@ To enable https://telegram.org/[Telegram] notifications you need to create and a
 
 | spring.boot.admin.notify.telegram.message
 | Text to send. SpEL-expressions are supported.
-| `+++"<strong>#{application.name}</strong>/#{application.id} is <strong>#{to.status}</strong>"+++`
+| `+++"&lt;strong&gt;#{instance.registration.name}&lt;/strong&gt;/#{instance.id} is &lt;strong&gt;#{event.statusInfo.status}&lt;/strong&gt;"+++`
 |===

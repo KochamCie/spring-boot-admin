@@ -29,6 +29,7 @@
       <template v-for="(context, ctxName) in contexts">
         <h3 class="title" v-text="ctxName" :key="ctxName"/>
         <sba-panel v-for="(report, name) in context.flywayBeans" :key="`${ctxName}-${name}`" :title="name"
+                   :header-sticks-below="['#navigation', '#instance-tabs']"
                    class="migration">
           <table class="table">
             <thead>
@@ -88,17 +89,15 @@
     },
     methods: {
       async fetchFlyway() {
-        if (this.instance) {
-          this.error = null;
-          try {
-            const res = await this.instance.fetchFlyway();
-            this.contexts = res.data.contexts;
-          } catch (error) {
-            console.warn('Fetching flyway reports failed:', error);
-            this.error = error;
-          }
-          this.hasLoaded = true;
+        this.error = null;
+        try {
+          const res = await this.instance.fetchFlyway();
+          this.contexts = res.data.contexts;
+        } catch (error) {
+          console.warn('Fetching flyway reports failed:', error);
+          this.error = error;
         }
+        this.hasLoaded = true;
       },
       stateClass(state) {
         switch (state) {
@@ -122,16 +121,17 @@
             return 'is-light';
         }
       }
+    },
+    install({viewRegistry}) {
+      viewRegistry.addView({
+        name: 'instances/flyway',
+        parent: 'instances',
+        path: 'flyway',
+        component: this,
+        label: 'Flyway',
+        order: 900,
+        isEnabled: ({instance}) => instance.hasEndpoint('flyway')
+      });
     }
   }
 </script>
-
-<style lang="scss">
-  @import "~@/assets/css/utilities";
-
-  .migration .card-header {
-    position: sticky;
-    background: $white;
-    top: ($navbar-height-px + $tabs-height-px);
-  }
-</style>

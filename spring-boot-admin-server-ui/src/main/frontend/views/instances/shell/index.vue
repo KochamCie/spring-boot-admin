@@ -15,9 +15,9 @@
   -->
 
 <template>
-  <div>
-    <sba-instance-header :instance="instance" :application="application"/>
-    <sba-instance-tabs :views="instanceViews" :instance="instance" :application="application"/>
+  <div class="instances">
+    <sba-instance-header :instance="instance" :application="application" :class="headerClass"/>
+    <sba-instance-tabs :views="views" :instance="instance" :application="application" :class="headerClass"/>
     <router-view v-if="instance" :instance="instance"/>
   </div>
 </template>
@@ -33,12 +33,16 @@
         type: String,
         required: true
       },
+      views: {
+        type: Array,
+        default: () => []
+      },
       applications: {
         type: Array,
         default: () => [],
       },
       error: {
-        type: Object,
+        type: null,
         default: null
       }
     },
@@ -49,9 +53,43 @@
       application() {
         return this.applications.findApplicationForInstance(this.instanceId);
       },
-      instanceViews() {
-        return this.$root.views.filter(view => view.name.lastIndexOf('instance/') === 0);
+      headerClass() {
+        if (!this.instance) {
+          return '';
+        }
+        if (this.instance.statusInfo.status === 'UP') {
+          return 'is-primary';
+        }
+        if (this.instance.statusInfo.status === 'RESTRICTED') {
+          return 'is-warning';
+        }
+        if (this.instance.statusInfo.status === 'DOWN') {
+          return 'is-danger';
+        }
+        if (this.instance.statusInfo.status === 'OUT_OF_SERVICE') {
+          return 'is-danger';
+        }
+        if (this.instance.statusInfo.status === 'OFFLINE') {
+          return 'is-light';
+        }
+        return 'is-light';
       }
+    },
+    install({viewRegistry}) {
+      viewRegistry.addView({
+        name: 'instances',
+        path: '/instances/:instanceId',
+        component: this,
+        props: true
+      });
     }
   }
 </script>
+
+<style lang="scss">
+  .instances {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+  }
+</style>

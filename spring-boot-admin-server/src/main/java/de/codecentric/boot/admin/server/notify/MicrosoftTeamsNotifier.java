@@ -30,6 +30,9 @@ import java.util.List;
 import java.util.MissingFormatArgumentException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.web.client.RestTemplate;
 
 import static java.util.Collections.singletonList;
@@ -65,7 +68,7 @@ public class MicrosoftTeamsNotifier extends AbstractStatusChangeNotifier {
      * Message will be used as title of the Activity section of the Teams message when an app
      * registers
      */
-    private String registerActivitySubtitlePattern = "%s with id %s has registered from Spring Boot Admin";
+    private String registerActivitySubtitlePattern = "%s with id %s has registered with Spring Boot Admin";
 
     /**
      * Message will be used as title of the Activity section of the Teams message when an app
@@ -106,13 +109,21 @@ public class MicrosoftTeamsNotifier extends AbstractStatusChangeNotifier {
             message = getDeregisteredMessage(instance);
         } else if (event instanceof InstanceStatusChangedEvent) {
             InstanceStatusChangedEvent statusChangedEvent = (InstanceStatusChangedEvent) event;
-            message = getStatusChangedMessage(instance, statusChangedEvent.getStatusInfo().getStatus(),
-                getLastStatus(event.getInstance()));
+            message = getStatusChangedMessage(instance,
+                getLastStatus(event.getInstance()),
+                statusChangedEvent.getStatusInfo().getStatus()
+            );
         } else {
             return Mono.empty();
         }
 
-        return Mono.fromRunnable(() -> this.restTemplate.postForEntity(webhookUrl, message, Void.class));
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        return Mono.fromRunnable(() -> this.restTemplate.postForEntity(webhookUrl,
+            new HttpEntity<Object>(message, headers),
+            Void.class
+        ));
     }
 
     @Override
@@ -124,19 +135,27 @@ public class MicrosoftTeamsNotifier extends AbstractStatusChangeNotifier {
 
     protected Message getDeregisteredMessage(Instance instance) {
         String activitySubtitle = this.safeFormat(deregisterActivitySubtitlePattern,
-            instance.getRegistration().getName(), instance.getId());
+            instance.getRegistration().getName(),
+            instance.getId()
+        );
         return createMessage(instance, deRegisteredTitle, activitySubtitle);
     }
 
     protected Message getRegisteredMessage(Instance instance) {
-        String activitySubtitle = this.safeFormat(registerActivitySubtitlePattern, instance.getRegistration().getName(),
-            instance.getId());
+        String activitySubtitle = this.safeFormat(registerActivitySubtitlePattern,
+            instance.getRegistration().getName(),
+            instance.getId()
+        );
         return createMessage(instance, registeredTitle, activitySubtitle);
     }
 
     protected Message getStatusChangedMessage(Instance instance, String statusFrom, String statusTo) {
-        String activitySubtitle = this.safeFormat(statusActivitySubtitlePattern, instance.getRegistration().getName(),
-            instance.getId(), statusFrom, statusTo);
+        String activitySubtitle = this.safeFormat(statusActivitySubtitlePattern,
+            instance.getRegistration().getName(),
+            instance.getId(),
+            statusFrom,
+            statusTo
+        );
         return createMessage(instance, statusChangedTitle, activitySubtitle);
     }
 
@@ -174,8 +193,16 @@ public class MicrosoftTeamsNotifier extends AbstractStatusChangeNotifier {
         this.webhookUrl = webhookUrl;
     }
 
+    public URI getWebhookUrl() {
+        return webhookUrl;
+    }
+
     public void setThemeColor(String themeColor) {
         this.themeColor = themeColor;
+    }
+
+    public String getThemeColor() {
+        return themeColor;
     }
 
     public String getDeregisterActivitySubtitlePattern() {
@@ -201,6 +228,7 @@ public class MicrosoftTeamsNotifier extends AbstractStatusChangeNotifier {
     public void setStatusActivitySubtitlePattern(String statusActivitySubtitlePattern) {
         this.statusActivitySubtitlePattern = statusActivitySubtitlePattern;
     }
+
 
     public String getDeRegisteredTitle() {
         return deRegisteredTitle;
